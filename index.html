@@ -322,6 +322,9 @@ footer a{color:var(--accent2);text-decoration:none}
     <span class="chip" onclick="setTicker('NVDA')">NVDA</span>
     <span class="chip" onclick="setTicker('AMZN')">AMZN</span>
     <span class="chip" onclick="setTicker('MSFT')">MSFT</span>
+    <span class="chip" onclick="setTicker('ORCL')">ORCL</span>
+    <span class="chip" onclick="setTicker('GOOGL')">GOOGL</span>
+    <span class="chip" onclick="setTicker('META')">META</span>
     <span class="chip" onclick="setTicker('005930.KS')">삼성전자</span>
     <span class="chip" onclick="setTicker('000660.KS')">SK하이닉스</span>
     <span class="chip" onclick="setTicker('BTC-USD')">비트코인</span>
@@ -331,8 +334,8 @@ footer a{color:var(--accent2);text-decoration:none}
 </div>
 
 <footer style="margin-top:32px">
-  <span>데이터: Yahoo Finance · alternative.me · 각 언론사 RSS — 20분 지연 가능 · 자동 새로고침 5분</span>
-  <span><a href="https://github.com" target="_blank">GitHub Pages</a>로 호스팅</span>
+  <span>데이터: Yahoo Finance · CNN Fear &amp; Greed · 각 언론사 RSS — GitHub Actions로 약 15분마다 갱신</span>
+  <span><a href="https://github.com/PgmJun/market-monitor" target="_blank">GitHub Pages</a>로 호스팅</span>
 </footer>
 </div>
 
@@ -347,23 +350,48 @@ function switchTab(id, btn) {
 }
 
 // ── 데이터 설정 ──────────────────────────────
+// 1순위: GitHub Actions가 15분마다 저장하는 같은 사이트의 스냅샷 (CORS 문제 없음)
+// 2순위: 스냅샷에 없는 티커만 공개 CORS 프록시로 시도
 const PROXIES = [
-  'https://api.allorigins.win/get?url=',
-  'https://corsproxy.io/?url=',
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+  u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
 ];
 
 async function fetchWithProxy(targetUrl) {
-  for (const proxy of PROXIES) {
+  for (const make of PROXIES) {
     try {
-      const r = await fetch(proxy + encodeURIComponent(targetUrl), {signal: AbortSignal.timeout(8000)});
+      const r = await fetch(make(targetUrl), {signal: AbortSignal.timeout(8000)});
       if (!r.ok) continue;
-      const o = await r.json();
-      // allorigins returns {contents:...}, corsproxy returns raw
-      const text = o.contents !== undefined ? o.contents : JSON.stringify(o);
-      return text;
+      const text = await r.text();
+      if (text && text.length > 20) return text;
     } catch { continue; }
   }
   return null;
+}
+
+let SNAP=null, HIST=null;
+async function loadSnapshot(force=false){
+  if(SNAP && !force) return SNAP;
+  try{
+    const r=await fetch('data/market.json?t='+Date.now());
+    if(r.ok) SNAP=await r.json();
+  }catch{}
+  return SNAP;
+}
+async function loadHistory(){
+  if(HIST) return HIST;
+  try{
+    const r=await fetch('data/history.json?t='+Math.floor(Date.now()/600000));
+    if(r.ok) HIST=await r.json();
+  }catch{}
+  return HIST;
+}
+const RANGE_BARS={'2d':5,'5d':5,'3mo':63,'6mo':126,'1y':252,'5y':99999};
+function sliceSeries(d,range){
+  const n=RANGE_BARS[range]||99999;
+  const tail=a=>(a||[]).slice(-n);
+  return {closes:tail(d.closes),highs:tail(d.highs),lows:tail(d.lows),vols:tail(d.vols),meta:d.meta};
 }
 
 const INDICES = [
@@ -383,7 +411,7 @@ const COMMODITIES=[
   {name:'천연가스',    sym:'NG=F', unit:'MMBtu'},
 ];
 const BONDS=[
-  {name:'미국 2년 국채',  sym:'^IRX', unit:'%'},
+  {name:'미국 13주 국채', sym:'^IRX', unit:'%'},
   {name:'미국 10년 국채', sym:'^TNX', unit:'%'},
   {name:'미국 30년 국채', sym:'^TYX', unit:'%'},
 ];
@@ -406,6 +434,14 @@ const cache={};
 async function fetchQ(sym,range='2d'){
   const key=sym+range;
   if(cache[key]&&Date.now()-cache[key].ts<60000) return cache[key].d;
+  // 스냅샷 우선
+  const isShort=(range==='2d'||range==='5d');
+  if(isShort){
+    const s=await loadSnapshot();
+    if(s?.quotes?.[sym]) return sliceSeries(s.quotes[sym],range);
+  }
+  const h=await loadHistory();
+  if(h?.symbols?.[sym]) return sliceSeries(h.symbols[sym],range);
   try{
     const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=${range}`;
     const text=await fetchWithProxy(url);
@@ -522,17 +558,23 @@ async function renderVIX(){
 async function renderFNG(){
   const el=document.getElementById('fng-panel');
   try{
-    const text=await fetchWithProxy('https://api.alternative.me/fng/?limit=8');
-    if(!text) throw new Error('no data');
-    const j=JSON.parse(text);
-    const items=j.data; const curr=items[0];
-    const val=parseInt(curr.value);
-    const lblKo={'Extreme Fear':'극단적 공포','Fear':'공포','Neutral':'중립','Greed':'탐욕','Extreme Greed':'극단적 탐욕'}[curr.value_classification]||curr.value_classification;
+    let items=null, source='';
+    const s=await loadSnapshot();
+    if(s?.fng?.items?.length){ items=s.fng.items; source=s.fng.source; }
+    else{
+      const text=await fetchWithProxy('https://api.alternative.me/fng/?limit=8');
+      if(!text) throw new Error('no data');
+      items=JSON.parse(text).data.map(d=>({value:+d.value,label:d.value_classification,ts:+d.timestamp}));
+      source='alternative.me (암호화폐)';
+    }
+    const curr=items[0];
+    const val=Math.round(+curr.value);
+    const lblKo={'extreme fear':'극단적 공포','fear':'공포','neutral':'중립','greed':'탐욕','extreme greed':'극단적 탐욕'}[String(curr.label).toLowerCase()]||curr.label;
     const color=val<=25?'var(--dn)':val<=45?'var(--warn)':val<=55?'var(--flat)':val<=75?'var(--up)':'var(--accent)';
     const hist=items.slice(1,7).map(it=>{
-      const v=parseInt(it.value);
+      const v=Math.round(+it.value);
       const c=v<=25?'var(--dn)':v<=45?'var(--warn)':v<=55?'var(--flat)':v<=75?'var(--up)':'var(--accent)';
-      const d=new Date(it.timestamp*1000);
+      const d=new Date(it.ts*1000);
       return `<div class="fng-hi"><div class="fng-hi-v" style="color:${c}">${v}</div><div class="fng-hi-d">${(d.getMonth()+1)}/${d.getDate()}</div></div>`;
     }).join('');
     el.innerHTML=`<div class="fng-row">
@@ -541,7 +583,7 @@ async function renderFNG(){
         <div class="fng-bar-track"><div class="fng-pointer" style="left:${val}%"></div></div>
         <div class="fng-scale"><span>극공포(0)</span><span>공포(25)</span><span>중립(50)</span><span>탐욕(75)</span><span>극탐욕(100)</span></div>
       </div>
-      <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--mono)">7일 히스토리</div><div class="fng-hist">${hist}</div></div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--mono)">최근 히스토리 · 출처 ${source}</div><div class="fng-hist">${hist}</div></div>
     </div>`;
   }catch{el.innerHTML=`<div style="padding:16px;color:var(--muted);font-size:13px">공포·탐욕 지수를 불러올 수 없습니다.</div>`;}
 }
@@ -566,8 +608,18 @@ async function renderTable(pid,items){
 }
 
 // ── 뉴스 ─────────────────────────────────────
-async function renderNews(pid,feeds){
+const escHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function renderNews(pid,region,feeds){
   const el=document.getElementById(pid);
+  const s=await loadSnapshot();
+  const snapItems=s?.news?.[region];
+  if(snapItems?.length){
+    el.innerHTML=snapItems.map(n=>{
+      const rel=n.pubDate?relTime(new Date(n.pubDate)):'';
+      return `<a class="ni" href="${escHtml(n.link)}" target="_blank" rel="noopener" style="display:block;color:inherit;text-decoration:none"><div class="ni-title">${escHtml(n.title)}</div><div class="ni-meta"><span class="ni-src">${escHtml(n.source)}</span><span>${rel}</span></div></a>`;
+    }).join('');
+    return;
+  }
   for(const url of feeds){
     try{
       const text=await fetchWithProxy(url);
@@ -596,10 +648,12 @@ function relTime(d){
 
 // ── 대시보드 전체 로드 ───────────────────────
 function updateTs(){
-  const n=new Date();
-  document.getElementById('updated-text').innerHTML=`<span class="live-dot"></span>${n.toLocaleString('ko-KR',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} 업데이트`;
+  const n=SNAP?.updated?new Date(SNAP.updated):new Date();
+  document.getElementById('updated-text').innerHTML=`<span class="live-dot"></span>${n.toLocaleString('ko-KR',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} 데이터 기준`;
 }
 async function loadDashboard(){
+  Object.keys(cache).forEach(k=>delete cache[k]);
+  await loadSnapshot(true);
   updateTs();
   await Promise.allSettled([
     renderHero(),
@@ -609,8 +663,8 @@ async function loadDashboard(){
     renderTable('bonds-panel',BONDS),
     renderTable('forex-panel',FOREX),
     renderTable('crypto-panel',CRYPTO),
-    renderNews('us-news-panel',['https://finance.yahoo.com/news/rssindex','https://feeds.reuters.com/reuters/businessNews']),
-    renderNews('kr-news-panel',['https://www.hankyung.com/feed/economy','https://www.yna.co.kr/rss/economy.xml','https://www.mk.co.kr/rss/30100041/']),
+    renderNews('us-news-panel','us',['https://finance.yahoo.com/news/rssindex']),
+    renderNews('kr-news-panel','kr',['https://www.hankyung.com/feed/economy','https://www.yna.co.kr/rss/economy.xml','https://www.mk.co.kr/rss/30100041/']),
   ]);
 }
 
@@ -950,7 +1004,7 @@ async function runAnalysis(){
   ]);
 
   if(!d3m?.closes?.length){
-    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>Yahoo Finance 심볼을 확인해주세요. (예: 삼성전자 → 005930.KS, 비트코인 → BTC-USD)</div></div>`;
+    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>빠른선택 종목은 서버에 미리 저장된 데이터를 쓰고, 그 외 티커는 공개 프록시로 받아와서 가끔 실패할 수 있어요. 잠시 후 다시 시도하거나 Yahoo Finance 심볼을 확인해주세요. (예: 삼성전자 → 005930.KS, 비트코인 → BTC-USD)</div></div>`;
     return;
   }
 
