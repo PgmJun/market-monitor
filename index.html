@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Market Monitor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0f1117; --surface:#181c25; --surface2:#1e2433;
+  --border:#252b38; --border2:#2e3547;
+  --text:#e2e8f0; --muted:#64748b; --faint:#1a1f2e;
+  --up:#34d399; --up-bg:rgba(52,211,153,.1);
+  --dn:#f87171; --dn-bg:rgba(248,113,113,.1);
+  --flat:#94a3b8;
+  --accent:#6366f1; --accent2:#818cf8;
+  --warn:#fbbf24; --warn-bg:rgba(251,191,36,.1);
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Noto Sans KR',sans-serif;
+}
+@media(prefers-color-scheme:light){:root{
+  --bg:#f1f5f9;--surface:#fff;--surface2:#f8fafc;
+  --border:#e2e8f0;--border2:#cbd5e1;
+  --text:#0f172a;--muted:#64748b;--faint:#f8fafc;
+}}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5}
+.page{max-width:1240px;margin:0 auto;padding:0 20px 60px}
+
+/* NAV */
+nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0 0;border-bottom:1px solid var(--border);margin-bottom:0;gap:12px;flex-wrap:wrap}
+.nav-logo{display:flex;align-items:center;gap:9px}
+.nav-logo-mark{width:32px;height:32px;background:var(--accent);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.nav-logo-text{font-size:16px;font-weight:700}
+.nav-logo-sub{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.nav-tabs{display:flex;gap:2px}
+.nav-tab{padding:8px 18px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted);background:none;border:none;transition:all .15s;border-bottom:2px solid transparent}
+.nav-tab:hover{color:var(--text)}
+.nav-tab.active{color:var(--accent2);border-bottom-color:var(--accent)}
+.nav-right{display:flex;align-items:center;gap:10px;padding-bottom:4px}
+.live-dot{display:inline-block;width:6px;height:6px;background:var(--up);border-radius:50%;margin-right:4px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#updated-text{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.btn{background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--sans);font-size:12px;font-weight:500;padding:6px 14px;border-radius:7px;cursor:pointer;transition:background .15s}
+.btn:hover{background:var(--border)}
+
+/* SECTION */
+.tab-content{display:none;padding-top:28px}
+.tab-content.active{display:block}
+.sec-head{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.sec-head h2{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.8px;text-transform:uppercase;white-space:nowrap}
+.sec-line{flex:1;height:1px;background:var(--border)}
+.mb28{margin-bottom:28px}
+
+/* HERO GRID */
+.hero-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:28px}
+.hero-card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:16px 18px;position:relative;overflow:hidden;transition:border-color .15s}
+.hero-card:hover{border-color:var(--border2)}
+.hero-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--card-accent,var(--accent));border-radius:13px 13px 0 0}
+.hc-name{font-size:10px;font-weight:700;color:var(--muted);margin-bottom:6px;letter-spacing:.4px}
+.hc-price{font-family:var(--mono);font-size:21px;font-weight:600;margin-bottom:4px;letter-spacing:-.3px}
+.hc-chg{font-family:var(--mono);font-size:12px;font-weight:600}
+.hc-chg.up{color:var(--up)}.hc-chg.dn{color:var(--dn)}.hc-chg.flat{color:var(--flat)}
+
+/* VIX 특별 패널 */
+.vix-panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px 26px;margin-bottom:28px;display:grid;grid-template-columns:200px 1fr auto;gap:24px;align-items:center}
+@media(max-width:700px){.vix-panel{grid-template-columns:1fr}}
+.vix-val{font-family:var(--mono);font-size:56px;font-weight:600;line-height:1}
+.vix-label{font-size:14px;font-weight:700;margin-top:4px}
+.vix-bar-track{height:12px;border-radius:99px;background:linear-gradient(90deg,var(--up) 0%,var(--warn) 30%,#fb923c 55%,var(--dn) 80%,#dc2626 100%);position:relative;margin-bottom:8px}
+.vix-pointer{position:absolute;top:-5px;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid var(--accent);transform:translateX(-50%);box-shadow:0 0 0 4px rgba(99,102,241,.25);transition:left .6s cubic-bezier(.34,1.56,.64,1)}
+.vix-scale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono)}
+.vix-meaning{display:flex;flex-direction:column;gap:6px}
+.vm-row{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;border-radius:9px;background:var(--faint);border:1px solid var(--border);font-size:12px}
+.vm-tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;margin-top:1px}
+
+/* FNG */
+.fng-panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 24px;margin-bottom:28px}
+.fng-row{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.fng-num{font-family:var(--mono);font-size:48px;font-weight:600;line-height:1}
+.fng-lbl{font-size:13px;font-weight:700;margin-top:3px}
+.fng-bar-track{height:10px;border-radius:99px;background:linear-gradient(90deg,#f87171 0%,#fbbf24 30%,#94a3b8 50%,#34d399 70%,#6366f1 100%);position:relative;margin-bottom:8px}
+.fng-pointer{position:absolute;top:-5px;width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--accent);transform:translateX(-50%);box-shadow:0 0 0 4px rgba(99,102,241,.2);transition:left .6s cubic-bezier(.34,1.56,.64,1)}
+.fng-scale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono)}
+.fng-hist{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.fng-hi{text-align:center;padding:7px 12px;background:var(--faint);border:1px solid var(--border);border-radius:8px}
+.fng-hi-v{font-family:var(--mono);font-size:16px;font-weight:600}
+.fng-hi-d{font-size:10px;color:var(--muted);margin-top:1px}
+
+/* TWO COL */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:28px}
+@media(max-width:680px){.two-col{grid-template-columns:1fr}}
+
+/* TABLE PANEL */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.panel-head{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.ph-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px}
+.ph-count{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.dr{display:grid;grid-template-columns:1fr auto auto;align-items:center;padding:10px 18px;border-bottom:1px solid var(--border);gap:8px;transition:background .1s}
+.dr:last-child{border-bottom:none}.dr:hover{background:var(--faint)}
+.dr-name{font-size:13px;font-weight:600}
+.dr-sub{font-size:10px;color:var(--muted);margin-top:1px}
+.dr-price{font-family:var(--mono);font-size:13px;font-weight:500;text-align:right}
+.dr-chg{font-family:var(--mono);font-size:11px;font-weight:600;text-align:right;min-width:70px;padding:2px 7px;border-radius:5px}
+.dr-chg.up{color:var(--up);background:var(--up-bg)}.dr-chg.dn{color:var(--dn);background:var(--dn-bg)}.dr-chg.flat{color:var(--flat)}
+
+/* NEWS */
+.news-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:28px}
+@media(max-width:680px){.news-grid{grid-template-columns:1fr}}
+.news-panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.ni{padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
+.ni:last-child{border-bottom:none}.ni:hover{background:var(--faint)}
+.ni-title{font-size:12px;font-weight:500;line-height:1.45;margin-bottom:3px}
+.ni-meta{font-size:10px;color:var(--muted);font-family:var(--mono);display:flex;gap:8px}
+.ni-src{color:var(--accent2)}
+
+/* SKELETON */
+.sk{background:linear-gradient(90deg,var(--border) 25%,var(--border2) 50%,var(--border) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:5px}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* ═══════════════════════════════════════
+   TAB 2: 지표 사전 (스토리 형식)
+═══════════════════════════════════════ */
+.dict-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;margin-bottom:28px}
+.dict-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:border-color .15s}
+.dict-card:hover{border-color:var(--border2)}
+.dc-head{padding:16px 20px 12px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:12px}
+.dc-icon{font-size:28px;line-height:1;flex-shrink:0}
+.dc-head-text{flex:1}
+.dc-title{font-size:15px;font-weight:700}
+.dc-sub{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4}
+.dc-what{padding:12px 20px;background:var(--faint);border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);line-height:1.6}
+.dc-what strong{color:var(--text);font-weight:600}
+.dc-body{padding:0}
+/* 스토리 시나리오 */
+.dc-scenario{padding:14px 20px;border-bottom:1px solid var(--border)}
+.dc-scenario:last-child{border-bottom:none}
+.dc-sc-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dc-tag{font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;white-space:nowrap}
+.dc-tag.up{color:var(--up);background:var(--up-bg)}
+.dc-tag.dn{color:var(--dn);background:var(--dn-bg)}
+.dc-tag.warn{color:var(--warn);background:var(--warn-bg)}
+.dc-tag.flat{color:var(--flat);background:var(--faint);border:1px solid var(--border)}
+.dc-sc-title{font-size:12px;font-weight:600;color:var(--text)}
+/* 인과 체인 */
+.dc-chain{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.dc-chain-step{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.5}
+.dc-chain-arrow{color:var(--muted);font-size:11px;margin-top:1px;flex-shrink:0;width:16px;text-align:center}
+.dc-chain-step:first-child .dc-chain-arrow{color:transparent}
+.dc-chain-text{color:var(--text)}
+.dc-chain-text em{color:var(--accent2);font-style:normal;font-weight:600}
+/* 내 주식 영향 박스 */
+.dc-impact{background:var(--faint);border-radius:8px;padding:8px 12px;font-size:11px;display:flex;align-items:flex-start;gap:6px;border-left:3px solid var(--border2)}
+.dc-impact.pos{border-left-color:var(--up)}
+.dc-impact.neg{border-left-color:var(--dn)}
+.dc-impact.neu{border-left-color:var(--warn)}
+.dc-impact-icon{font-size:13px;flex-shrink:0;margin-top:1px}
+.dc-impact-text{color:var(--muted);line-height:1.5}
+.dc-impact-text b{color:var(--text);font-weight:600}
+/* 비유 */
+.dc-analogy{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px;padding-left:4px}
+.dc-analogy::before{content:'💡 ';font-style:normal}
+
+/* ═══════════════════════════════════════
+   TAB 3: 종목 분석
+═══════════════════════════════════════ */
+.stock-search{display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap}
+.ticker-input{flex:1;min-width:160px;max-width:280px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:15px;font-weight:600;padding:11px 16px;border-radius:10px;outline:none;letter-spacing:1px;text-transform:uppercase}
+.ticker-input:focus{border-color:var(--accent)}
+.analyze-btn{background:var(--accent);color:#fff;border:none;font-family:var(--sans);font-size:14px;font-weight:700;padding:11px 24px;border-radius:10px;cursor:pointer;transition:opacity .15s}
+.analyze-btn:hover{opacity:.85}
+.preset-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
+.chip{padding:5px 12px;background:var(--faint);border:1px solid var(--border);border-radius:99px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .15s;font-family:var(--mono)}
+.chip:hover{border-color:var(--accent2);color:var(--accent2)}
+
+/* 분석 결과 */
+#analysis-result{display:none}
+.stock-hero{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px 26px;margin-bottom:20px;display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:16px}
+.sh-name{font-size:24px;font-weight:700;margin-bottom:4px}
+.sh-ticker{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.sh-price{font-family:var(--mono);font-size:40px;font-weight:600;line-height:1;margin-bottom:4px}
+.sh-chg{font-family:var(--mono);font-size:15px;font-weight:600}
+
+/* 바닥/천장 평가 */
+.eval-banner{border-radius:14px;padding:20px 26px;margin-bottom:20px;border:2px solid}
+.eval-banner.buy{background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.3)}
+.eval-banner.sell{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.3)}
+.eval-banner.neutral{background:rgba(148,163,184,.08);border-color:rgba(148,163,184,.25)}
+.eval-banner.caution{background:rgba(251,191,36,.08);border-color:rgba(251,191,36,.3)}
+.eb-top{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.eb-icon{font-size:28px}
+.eb-title{font-size:20px;font-weight:700}
+.eb-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px}
+.eb-desc{font-size:13px;line-height:1.65;color:var(--text);max-width:680px}
+
+/* 지표 그리드 */
+.indicator-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+@media(max-width:700px){.indicator-grid{grid-template-columns:1fr}}
+.ind-card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:16px 18px}
+.ind-period{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.6px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.ind-period::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--period-color,var(--accent));flex-shrink:0}
+.ind-rows{display:flex;flex-direction:column;gap:7px}
+.ind-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ind-lbl{font-size:12px;color:var(--muted)}
+.ind-val{font-family:var(--mono);font-size:13px;font-weight:600}
+.ind-sig{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px}
+.ind-sig.up{color:var(--up);background:var(--up-bg)}
+.ind-sig.dn{color:var(--dn);background:var(--dn-bg)}
+.ind-sig.flat{color:var(--flat);background:var(--faint)}
+.ind-sig.warn{color:var(--warn);background:var(--warn-bg)}
+
+/* 스코어 바 */
+.score-panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 24px;margin-bottom:20px}
+.score-label{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:12px}
+.score-bar-wrap{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.score-track{flex:1;height:14px;border-radius:99px;background:linear-gradient(90deg,var(--up) 0%,var(--warn) 45%,var(--dn) 100%);position:relative}
+.score-pointer{position:absolute;top:-5px;width:24px;height:24px;border-radius:50%;background:#fff;border:3px solid #111;transform:translateX(-50%);transition:left .6s cubic-bezier(.34,1.56,.64,1)}
+.score-num{font-family:var(--mono);font-size:22px;font-weight:600;min-width:44px;text-align:right}
+.score-ticks{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono)}
+
+/* 면책 */
+.disclaimer{font-size:11px;color:var(--muted);background:var(--faint);border:1px solid var(--border);border-radius:9px;padding:10px 14px;line-height:1.6}
+
+/* 로딩 스피너 */
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+footer{border-top:1px solid var(--border);padding-top:18px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+footer a{color:var(--accent2);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">
+    <div class="nav-logo-mark">📡</div>
+    <div>
+      <div class="nav-logo-text">Market Monitor</div>
+      <div class="nav-logo-sub">글로벌 시장 모니터링</div>
+    </div>
+  </div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="switchTab('dashboard',this)">📊 대시보드</button>
+    <button class="nav-tab" onclick="switchTab('dictionary',this)">📖 지표 사전</button>
+    <button class="nav-tab" onclick="switchTab('analyzer',this)">🔍 종목 분석</button>
+  </div>
+  <div class="nav-right">
+    <span id="updated-text"><span class="live-dot"></span>로딩 중...</span>
+    <button class="btn" onclick="loadDashboard()">↻ 새로고침</button>
+  </div>
+</nav>
+
+<!-- ═══════════ TAB 1: 대시보드 ═══════════ -->
+<div id="tab-dashboard" class="tab-content active">
+  <div class="sec-head mb28" style="margin-top:0"><h2>주요 지수</h2><div class="sec-line"></div></div>
+  <div class="hero-grid" id="hero-grid"></div>
+
+  <div class="sec-head"><h2>VIX 공포지수 — 시장 불안 온도계</h2><div class="sec-line"></div></div>
+  <div class="vix-panel mb28" id="vix-detail">
+    <div><div class="sk" style="height:56px;width:100px;margin-bottom:8px"></div><div class="sk" style="height:14px;width:70px"></div></div>
+    <div><div class="sk" style="height:12px;margin-bottom:8px"></div><div class="sk" style="height:10px;width:80%"></div></div>
+    <div style="display:flex;flex-direction:column;gap:6px"><div class="sk" style="height:36px"></div><div class="sk" style="height:36px"></div><div class="sk" style="height:36px"></div></div>
+  </div>
+
+  <div class="sec-head"><h2>CNN 공포·탐욕 지수</h2><div class="sec-line"></div></div>
+  <div class="fng-panel mb28" id="fng-panel"><div class="sk" style="height:70px;border-radius:9px"></div></div>
+
+  <div class="two-col">
+    <div>
+      <div class="sec-head"><h2>원자재</h2><div class="sec-line"></div></div>
+      <div class="panel" id="commodities-panel"><div style="padding:16px"><div class="sk" style="height:14px;margin-bottom:8px"></div><div class="sk" style="height:14px;margin-bottom:8px"></div><div class="sk" style="height:14px"></div></div></div>
+    </div>
+    <div>
+      <div class="sec-head"><h2>채권 · 금리</h2><div class="sec-line"></div></div>
+      <div class="panel" id="bonds-panel"><div style="padding:16px"><div class="sk" style="height:14px;margin-bottom:8px"></div><div class="sk" style="height:14px;margin-bottom:8px"></div><div class="sk" style="height:14px"></div></div></div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <div class="sec-head"><h2>주요 환율</h2><div class="sec-line"></div></div>
+      <div class="panel" id="forex-panel"><div style="padding:16px"><div class="sk" style="height:14px;margin-bottom:8px"></div><div class="sk" style="height:14px"></div></div></div>
+    </div>
+    <div>
+      <div class="sec-head"><h2>암호화폐</h2><div class="sec-line"></div></div>
+      <div class="panel" id="crypto-panel"><div style="padding:16px"><div class="sk" style="height:14px;margin-bottom:8px"></div><div class="sk" style="height:14px"></div></div></div>
+    </div>
+  </div>
+
+  <div class="sec-head"><h2>실시간 경제 뉴스</h2><div class="sec-line"></div></div>
+  <div class="news-grid">
+    <div>
+      <div class="sec-head" style="margin-bottom:10px"><h2 style="color:var(--accent2);text-transform:none;font-size:12px">🇺🇸 미국</h2></div>
+      <div class="news-panel" id="us-news-panel"></div>
+    </div>
+    <div>
+      <div class="sec-head" style="margin-bottom:10px"><h2 style="color:var(--accent2);text-transform:none;font-size:12px">🇰🇷 국내</h2></div>
+      <div class="news-panel" id="kr-news-panel"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ TAB 2: 지표 사전 ═══════════ -->
+<div id="tab-dictionary" class="tab-content">
+  <div class="dict-grid" id="dict-grid"></div>
+</div>
+
+<!-- ═══════════ TAB 3: 종목 분석 ═══════════ -->
+<div id="tab-analyzer" class="tab-content">
+  <div class="stock-search">
+    <input class="ticker-input" id="ticker-input" placeholder="AAPL, TSLA, 005930.KS …" maxlength="20"
+      onkeydown="if(event.key==='Enter')runAnalysis()">
+    <button class="analyze-btn" onclick="runAnalysis()">분석하기</button>
+  </div>
+  <div class="preset-chips">
+    <span style="font-size:11px;color:var(--muted);padding:5px 4px;font-family:var(--mono)">빠른선택:</span>
+    <span class="chip" onclick="setTicker('AAPL')">AAPL</span>
+    <span class="chip" onclick="setTicker('TSLA')">TSLA</span>
+    <span class="chip" onclick="setTicker('NVDA')">NVDA</span>
+    <span class="chip" onclick="setTicker('AMZN')">AMZN</span>
+    <span class="chip" onclick="setTicker('MSFT')">MSFT</span>
+    <span class="chip" onclick="setTicker('005930.KS')">삼성전자</span>
+    <span class="chip" onclick="setTicker('000660.KS')">SK하이닉스</span>
+    <span class="chip" onclick="setTicker('BTC-USD')">비트코인</span>
+  </div>
+  <div id="analysis-result"></div>
+  <div class="disclaimer">⚠️ 본 분석은 <b>기술적 지표</b> 기반 참고 정보입니다. 투자 권유가 아니며 실제 투자 결과와 다를 수 있습니다. 투자 판단의 최종 책임은 투자자 본인에게 있습니다.</div>
+</div>
+
+<footer style="margin-top:32px">
+  <span>데이터: Yahoo Finance · alternative.me · 각 언론사 RSS — 20분 지연 가능 · 자동 새로고침 5분</span>
+  <span><a href="https://github.com" target="_blank">GitHub Pages</a>로 호스팅</span>
+</footer>
+</div>
+
+<script>
+// ── 탭 전환 ──────────────────────────────────
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+  if (id==='dictionary') renderDictionary();
+}
+
+// ── 데이터 설정 ──────────────────────────────
+const PROXIES = [
+  'https://api.allorigins.win/get?url=',
+  'https://corsproxy.io/?url=',
+];
+
+async function fetchWithProxy(targetUrl) {
+  for (const proxy of PROXIES) {
+    try {
+      const r = await fetch(proxy + encodeURIComponent(targetUrl), {signal: AbortSignal.timeout(8000)});
+      if (!r.ok) continue;
+      const o = await r.json();
+      // allorigins returns {contents:...}, corsproxy returns raw
+      const text = o.contents !== undefined ? o.contents : JSON.stringify(o);
+      return text;
+    } catch { continue; }
+  }
+  return null;
+}
+
+const INDICES = [
+  {name:'S&P 500', sym:'^GSPC', accent:'#6366f1'},
+  {name:'NASDAQ',  sym:'^IXIC', accent:'#818cf8'},
+  {name:'DOW',     sym:'^DJI',  accent:'#a78bfa'},
+  {name:'KOSPI',   sym:'^KS11', accent:'#34d399'},
+  {name:'KOSDAQ',  sym:'^KQ11', accent:'#6ee7b7'},
+  {name:'닛케이',  sym:'^N225', accent:'#f87171'},
+];
+const COMMODITIES=[
+  {name:'WTI 원유',    sym:'CL=F', unit:'USD/bbl'},
+  {name:'브렌트 원유', sym:'BZ=F', unit:'USD/bbl'},
+  {name:'금',          sym:'GC=F', unit:'USD/oz'},
+  {name:'은',          sym:'SI=F', unit:'USD/oz'},
+  {name:'구리',        sym:'HG=F', unit:'USD/lb'},
+  {name:'천연가스',    sym:'NG=F', unit:'MMBtu'},
+];
+const BONDS=[
+  {name:'미국 2년 국채',  sym:'^IRX', unit:'%'},
+  {name:'미국 10년 국채', sym:'^TNX', unit:'%'},
+  {name:'미국 30년 국채', sym:'^TYX', unit:'%'},
+];
+const FOREX=[
+  {name:'USD/KRW', sym:'KRW=X',    unit:'₩'},
+  {name:'EUR/USD', sym:'EURUSD=X', unit:''},
+  {name:'USD/JPY', sym:'JPY=X',    unit:'¥'},
+  {name:'GBP/USD', sym:'GBPUSD=X', unit:''},
+  {name:'USD/CNY', sym:'CNY=X',    unit:'¥'},
+];
+const CRYPTO=[
+  {name:'Bitcoin',  sym:'BTC-USD', unit:'USD'},
+  {name:'Ethereum', sym:'ETH-USD', unit:'USD'},
+  {name:'Solana',   sym:'SOL-USD', unit:'USD'},
+  {name:'XRP',      sym:'XRP-USD', unit:'USD'},
+];
+
+// ── fetch 헬퍼 ───────────────────────────────
+const cache={};
+async function fetchQ(sym,range='2d'){
+  const key=sym+range;
+  if(cache[key]&&Date.now()-cache[key].ts<60000) return cache[key].d;
+  try{
+    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=${range}`;
+    const text=await fetchWithProxy(url);
+    if(!text) return null;
+    const j=JSON.parse(text);
+    const res=j.chart.result[0];
+    const closes=res.indicators.quote[0].close.filter(Boolean);
+    const highs=res.indicators.quote[0].high?.filter(Boolean)||[];
+    const lows=res.indicators.quote[0].low?.filter(Boolean)||[];
+    const vols=res.indicators.quote[0].volume?.filter(Boolean)||[];
+    cache[key]={ts:Date.now(),d:{closes,highs,lows,vols,meta:res.meta}};
+    return cache[key].d;
+  }catch{return null;}
+}
+
+function fmt(v,unit=''){
+  if(v==null||isNaN(v)) return '—';
+  if(unit==='%') return v.toFixed(2);
+  if(v>=100000) return v.toLocaleString('ko-KR',{maximumFractionDigits:0});
+  if(v>=1000)   return v.toLocaleString('ko-KR',{maximumFractionDigits:2});
+  if(v>=10)     return v.toFixed(2);
+  return v.toFixed(4);
+}
+function chgInfo(pct){
+  if(pct==null) return {t:'—',c:'flat'};
+  const s=pct>=0?'+':'';
+  const a=pct>=0.05?'▲':pct<=-0.05?'▼':'—';
+  return {t:`${a} ${s}${pct.toFixed(2)}%`, c:pct>0.05?'up':pct<-0.05?'dn':'flat'};
+}
+
+// ── 히어로 ───────────────────────────────────
+async function renderHero(){
+  const g=document.getElementById('hero-grid');
+  g.innerHTML=INDICES.map(()=>`<div class="hero-card" style="min-height:110px"><div class="sk" style="height:10px;width:50px;margin-bottom:10px"></div><div class="sk" style="height:24px;width:100px;margin-bottom:8px"></div><div class="sk" style="height:12px;width:70px"></div></div>`).join('');
+  const rs=await Promise.all(INDICES.map(i=>fetchQ(i.sym)));
+  g.innerHTML=INDICES.map((idx,i)=>{
+    const d=rs[i]; const c=d?.closes; const last=c?c[c.length-1]:null;
+    const prev=c&&c.length>1?c[c.length-2]:null;
+    const pct=last&&prev?(last-prev)/prev*100:null;
+    const {t,c:cls}=chgInfo(pct);
+    return `<div class="hero-card" style="--card-accent:${idx.accent}">
+      <div class="hc-name">${idx.name}</div>
+      <div class="hc-price">${fmt(last)}</div>
+      <div class="hc-chg ${cls}">${t}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── VIX 상세 패널 ────────────────────────────
+async function renderVIX(){
+  const el=document.getElementById('vix-detail');
+  const d=await fetchQ('^VIX');
+  const closes=d?.closes||[];
+  const val=closes[closes.length-1];
+  const prev=closes[closes.length-2]||val;
+  const pct=val&&prev?(val-prev)/prev*100:0;
+  if(!val){el.innerHTML=`<div style="padding:16px;color:var(--muted)">VIX 데이터를 불러올 수 없습니다.</div>`;return;}
+
+  let level,lcolor,meanings;
+  if(val<15){
+    level='안정 (과도한 낙관)'; lcolor='var(--up)';
+    meanings=[
+      {tag:'시장 심리',cls:'up',text:'투자자들이 <b>매우 낙관적</b>. 변동성이 낮고 시장이 안정적.'},
+      {tag:'주의 신호',cls:'warn',text:'VIX가 너무 낮으면 <b>자만심 과잉</b> 신호. 예상치 못한 충격에 취약할 수 있음.'},
+      {tag:'전략 힌트',cls:'flat',text:'안정적 환경이지만 <b>풋 옵션이 저렴</b>해 헤지 기회일 수 있음.'},
+    ];
+  } else if(val<25){
+    level='정상 범위'; lcolor='var(--flat)';
+    meanings=[
+      {tag:'시장 심리',cls:'flat',text:'건전한 수준의 불확실성. <b>정상적인 시장 환경</b>.'},
+      {tag:'주식 영향',cls:'flat',text:'주가 움직임이 예측 가능한 범위. 급격한 변동 가능성 낮음.'},
+      {tag:'전략 힌트',cls:'up',text:'일반적인 <b>매수/보유 전략</b>이 유효한 환경.'},
+    ];
+  } else if(val<35){
+    level='불안 (변동성 확대)'; lcolor='var(--warn)';
+    meanings=[
+      {tag:'시장 심리',cls:'warn',text:'투자자 <b>불안감 고조</b>. 변동성이 커지며 급등락 빈번.'},
+      {tag:'주식 영향',cls:'dn',text:'단기 <b>하락 압력</b>이 강해질 가능성. 리스크 관리 필요.'},
+      {tag:'전략 힌트',cls:'warn',text:'포지션 축소·현금 비중 확대 고려. 저가 매수 기회 탐색 시작.'},
+    ];
+  } else {
+    level='공포 (극단적 변동성)'; lcolor='var(--dn)';
+    meanings=[
+      {tag:'시장 심리',cls:'dn',text:'극단적 공포. 투자자들이 <b>패닉 매도</b>. 급격한 하락 진행 중.'},
+      {tag:'역발상 신호',cls:'warn',text:'VIX 40+ 은 역사적으로 <b>중장기 저점 근처</b>. 과거 대부분 반등 시작.'},
+      {tag:'전략 힌트',cls:'up',text:'분할 매수 시작 고려. 단, <b>추가 하락 가능성</b>도 열어둘 것.'},
+    ];
+  }
+
+  const pctInfo=chgInfo(pct);
+  const barPct=Math.min(val/60*100,100);
+
+  el.innerHTML=`
+    <div>
+      <div class="vix-val" style="color:${lcolor}">${val.toFixed(2)}</div>
+      <div class="vix-label" style="color:${lcolor}">${level}</div>
+      <div class="hc-chg ${pctInfo.c}" style="margin-top:6px;font-family:var(--mono);font-size:13px;font-weight:600">${pctInfo.t}</div>
+    </div>
+    <div>
+      <div class="vix-bar-track" style="margin-bottom:8px">
+        <div class="vix-pointer" style="left:${barPct}%"></div>
+      </div>
+      <div class="vix-scale"><span>안정 (0)</span><span>정상 (15)</span><span>불안 (25)</span><span>공포 (35+)</span></div>
+    </div>
+    <div class="vix-meaning">
+      ${meanings.map(m=>`<div class="vm-row">
+        <span class="vm-tag ${m.cls}">${m.tag}</span>
+        <span style="font-size:12px;line-height:1.5;color:var(--text)">${m.text}</span>
+      </div>`).join('')}
+    </div>`;
+}
+
+// ── 공포탐욕 ─────────────────────────────────
+async function renderFNG(){
+  const el=document.getElementById('fng-panel');
+  try{
+    const text=await fetchWithProxy('https://api.alternative.me/fng/?limit=8');
+    if(!text) throw new Error('no data');
+    const j=JSON.parse(text);
+    const items=j.data; const curr=items[0];
+    const val=parseInt(curr.value);
+    const lblKo={'Extreme Fear':'극단적 공포','Fear':'공포','Neutral':'중립','Greed':'탐욕','Extreme Greed':'극단적 탐욕'}[curr.value_classification]||curr.value_classification;
+    const color=val<=25?'var(--dn)':val<=45?'var(--warn)':val<=55?'var(--flat)':val<=75?'var(--up)':'var(--accent)';
+    const hist=items.slice(1,7).map(it=>{
+      const v=parseInt(it.value);
+      const c=v<=25?'var(--dn)':v<=45?'var(--warn)':v<=55?'var(--flat)':v<=75?'var(--up)':'var(--accent)';
+      const d=new Date(it.timestamp*1000);
+      return `<div class="fng-hi"><div class="fng-hi-v" style="color:${c}">${v}</div><div class="fng-hi-d">${(d.getMonth()+1)}/${d.getDate()}</div></div>`;
+    }).join('');
+    el.innerHTML=`<div class="fng-row">
+      <div><div class="fng-num" style="color:${color}">${val}</div><div class="fng-lbl" style="color:${color}">${lblKo}</div></div>
+      <div style="flex:1;min-width:200px">
+        <div class="fng-bar-track"><div class="fng-pointer" style="left:${val}%"></div></div>
+        <div class="fng-scale"><span>극공포(0)</span><span>공포(25)</span><span>중립(50)</span><span>탐욕(75)</span><span>극탐욕(100)</span></div>
+      </div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--mono)">7일 히스토리</div><div class="fng-hist">${hist}</div></div>
+    </div>`;
+  }catch{el.innerHTML=`<div style="padding:16px;color:var(--muted);font-size:13px">공포·탐욕 지수를 불러올 수 없습니다.</div>`;}
+}
+
+// ── 테이블 패널 ──────────────────────────────
+const PANEL_ICONS={'commodities-panel':'🛢️','bonds-panel':'📊','forex-panel':'💱','crypto-panel':'₿'};
+async function renderTable(pid,items){
+  const el=document.getElementById(pid);
+  const rs=await Promise.all(items.map(i=>fetchQ(i.sym)));
+  const rows=items.map((item,i)=>{
+    const c=rs[i]?.closes; const last=c?c[c.length-1]:null;
+    const prev=c&&c.length>1?c[c.length-2]:null;
+    const pct=last&&prev?(last-prev)/prev*100:null;
+    const {t,c:cls}=chgInfo(pct);
+    return `<div class="dr">
+      <div><div class="dr-name">${item.name}</div><div class="dr-sub">${item.unit||''}</div></div>
+      <div class="dr-price">${fmt(last,item.unit)}</div>
+      <div class="dr-chg ${cls}">${t}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML=`<div class="panel-head"><span class="ph-title">${PANEL_ICONS[pid]||''} ${pid.replace('-panel','').replace('commodities','원자재').replace('bonds','채권').replace('forex','환율').replace('crypto','암호화폐')}</span><span class="ph-count">${items.length}개</span></div><div>${rows}</div>`;
+}
+
+// ── 뉴스 ─────────────────────────────────────
+async function renderNews(pid,feeds){
+  const el=document.getElementById(pid);
+  for(const url of feeds){
+    try{
+      const text=await fetchWithProxy(url);
+      if(!text) continue;
+      const xml=new DOMParser().parseFromString(text,'text/xml');
+      const items=Array.from(xml.querySelectorAll('item')).slice(0,6);
+      if(!items.length) continue;
+      const src=xml.querySelector('channel > title')?.textContent?.trim()||'뉴스';
+      el.innerHTML=items.map(it=>{
+        const title=it.querySelector('title')?.textContent?.trim()||'';
+        const link=it.querySelector('link')?.textContent?.trim()||'#';
+        const pd=it.querySelector('pubDate')?.textContent||'';
+        const rel=pd?relTime(new Date(pd)):'';
+        return `<div class="ni" onclick="window.open('${link}','_blank')"><div class="ni-title">${title}</div><div class="ni-meta"><span class="ni-src">${src}</span><span>${rel}</span></div></div>`;
+      }).join('');
+      return;
+    }catch{continue;}
+  }
+  el.innerHTML=`<div style="padding:16px;color:var(--muted);font-size:13px">뉴스를 불러올 수 없습니다.</div>`;
+}
+function relTime(d){
+  const s=(Date.now()-d)/1000;
+  if(s<60) return '방금'; if(s<3600) return `${~~(s/60)}분 전`;
+  if(s<86400) return `${~~(s/3600)}시간 전`; return `${~~(s/86400)}일 전`;
+}
+
+// ── 대시보드 전체 로드 ───────────────────────
+function updateTs(){
+  const n=new Date();
+  document.getElementById('updated-text').innerHTML=`<span class="live-dot"></span>${n.toLocaleString('ko-KR',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} 업데이트`;
+}
+async function loadDashboard(){
+  updateTs();
+  await Promise.allSettled([
+    renderHero(),
+    renderVIX(),
+    renderFNG(),
+    renderTable('commodities-panel',COMMODITIES),
+    renderTable('bonds-panel',BONDS),
+    renderTable('forex-panel',FOREX),
+    renderTable('crypto-panel',CRYPTO),
+    renderNews('us-news-panel',['https://finance.yahoo.com/news/rssindex','https://feeds.reuters.com/reuters/businessNews']),
+    renderNews('kr-news-panel',['https://www.hankyung.com/feed/economy','https://www.yna.co.kr/rss/economy.xml','https://www.mk.co.kr/rss/30100041/']),
+  ]);
+}
+
+// ══════════════════════════════════════════════
+// TAB 2: 지표 사전 (초보자 친화 스토리 형식)
+// ══════════════════════════════════════════════
+const DICT_DATA=[
+  {
+    icon:'📈', title:'VIX (변동성 지수)', sub:'시장 공포계 · 정상범위 15~25',
+    what:'VIX는 <strong>"앞으로 30일 동안 주가가 얼마나 출렁일까?"</strong>를 수치로 나타낸 거예요. 숫자가 클수록 투자자들이 불안해한다는 뜻이에요.',
+    scenarios:[
+      {
+        tag:'📉 VIX 급등 (25 이상)', cls:'dn', title:'투자자들이 겁먹고 있어요',
+        chain:[
+          {text:'어딘가에서 갑작스러운 악재 (전쟁, 금리 쇼크, 기업 파산 등) 발생'},
+          {text:'투자자들이 <em>팔고 싶다</em>는 심리가 강해짐'},
+          {text:'시장 전체가 요동치면서 VIX 급등'},
+          {text:'주가는 단기적으로 크게 하락하는 경향'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>보유 주식이 흔들릴 수 있어요.</b> 하지만 VIX 30 이상에서 오히려 좋은 주식을 싸게 살 기회가 생기기도 해요. 장기 투자자에겐 바겐세일 구간이기도 합니다.',
+        analogy:'마트에서 갑자기 "폐점 세일"을 하면 사람들이 몰려 난리가 나는 것처럼, 시장도 패닉 상태가 됩니다. 하지만 그 틈에 좋은 물건을 싸게 집는 사람도 있죠.',
+      },
+      {
+        tag:'📈 VIX 하락 (15 이하)', cls:'up', title:'시장이 평화롭고 낙관적이에요',
+        chain:[
+          {text:'경기가 안정적이고 큰 악재가 없는 상태'},
+          {text:'투자자들이 <em>편안하게 사고팔고</em> 있음'},
+          {text:'주가가 꾸준히 오르는 경향'},
+          {text:'단, 너무 낮으면 "다들 너무 방심한 거 아냐?" 경계 신호'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>주식 보유하기 좋은 환경이에요.</b> 큰 변동 없이 서서히 오르는 장세가 많아요. 단, VIX 10 이하는 역사적으로 큰 충격 직전인 경우도 있었으니 주의하세요.',
+        analogy:'파도가 잔잔한 날 수영하기 좋은 것처럼, VIX가 낮으면 투자하기 편한 날씨예요.',
+      },
+    ]
+  },
+  {
+    icon:'🛢️', title:'유가 (WTI / 브렌트)', sub:'에너지 가격 · 인플레이션과 직결',
+    what:'석유는 <strong>모든 제품을 만들고 운반하는 에너지원</strong>이에요. 유가가 오르면 모든 것의 생산 비용이 올라가고, 인플레이션(물가 상승)으로 이어져요.',
+    scenarios:[
+      {
+        tag:'🔺 유가 상승', cls:'warn', title:'물건 만들고 배달하는 비용이 올라요',
+        chain:[
+          {text:'석유 가격 상승 → 운송비·전기료·원자재비 상승'},
+          {text:'기업들의 <em>생산 원가</em>가 높아짐'},
+          {text:'물가 상승 (인플레이션) → 중앙은행이 금리 인상 검토'},
+          {text:'금리 인상 → 기업 대출 부담 증가 → 주가 하락 압력'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>특히 항공·운송·플라스틱·화학주에 부정적이에요.</b> 반면 에너지 기업(정유·가스)이나 대체에너지(태양광·풍력)주는 수혜를 받기도 해요. 삼성전자 같은 IT주는 비교적 영향이 적어요.',
+        analogy:'택시비가 오르면 사람들이 이동을 줄이는 것처럼, 기업들도 비싼 에너지 앞에 투자를 줄여요.',
+      },
+      {
+        tag:'🔻 유가 하락', cls:'up', title:'기업과 소비자 모두 숨통이 트여요',
+        chain:[
+          {text:'석유 가격 하락 → 교통비·냉난방비 절감'},
+          {text:'기업 원가 감소 → <em>이익률 개선</em>'},
+          {text:'소비자 지갑이 여유로워짐 → 소비 증가'},
+          {text:'경기 활성화 기대 → 주가 상승 요인'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>제조업·항공·운송·소매 업종에 호재예요.</b> 단, 유가가 너무 급격히 떨어지면 "경기침체로 수요가 줄어서 내린 것"일 수 있어서 오히려 주의 신호가 됩니다.',
+        analogy:'주유비가 반으로 줄면 여행을 더 많이 가고 배달도 더 시키게 되는 것처럼, 경제 전체가 활기를 띠어요.',
+      },
+    ]
+  },
+  {
+    icon:'🥇', title:'금 (Gold)', sub:'안전자산 · 불안할 때 오르는 자산',
+    what:'금은 <strong>"세상이 불안할 때 사람들이 도망치는 피난처"</strong>예요. 주식이나 달러가 위험해 보일 때 금으로 옮기는 경향이 있어요.',
+    scenarios:[
+      {
+        tag:'📈 금값 상승', cls:'warn', title:'세상 어딘가가 불안하다는 신호예요',
+        chain:[
+          {text:'전쟁·금융위기·경기침체 우려 발생'},
+          {text:'사람들이 <em>안전한 자산</em>으로 이동 (주식 매도 → 금 매수)'},
+          {text:'금값 상승, 주가는 동반 하락하는 경우 많음'},
+          {text:'달러가 약해지거나 금리가 낮아질 때도 금이 매력적이 됨'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>금값이 오르면 보통 주식(특히 성장주)은 조심해야 해요.</b> 단, 금값 상승이 단순 인플레이션 헤지라면 원자재·에너지 관련 주식은 함께 강세일 수 있어요.',
+        analogy:'날씨가 나빠질 것 같으면 우산을 챙기는 것처럼, 세상이 불안해지면 사람들은 금이라는 "우산"을 삽니다.',
+      },
+      {
+        tag:'📉 금값 하락', cls:'up', title:'사람들이 위험을 감수하고 투자를 늘려요',
+        chain:[
+          {text:'경기가 좋고 주식 시장이 안정적'},
+          {text:'굳이 <em>안전 자산</em>에 피신할 필요가 없어짐'},
+          {text:'금 → 주식으로 자금 이동'},
+          {text:'주식 시장 상승 동력 강화'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>금값 하락은 보통 주식 상승장의 신호예요.</b> 특히 기술주·성장주가 강세를 보이는 경향이 있어요. 투자자들이 "이제 안심하고 위험을 감수하겠다"는 뜻이니까요.',
+        analogy:'날씨가 화창하면 우산 대신 선글라스를 챙기는 것처럼, 좋은 장세에선 안전 자산 대신 성장 자산이 인기를 끌어요.',
+      },
+    ]
+  },
+  {
+    icon:'📊', title:'미국 국채 금리 (10년)', sub:'글로벌 돈의 기준 금리 · 주가 할인율',
+    what:'국채 금리는 <strong>"돈의 가격"</strong>이에요. 금리가 오르면 미래의 기업 이익도 지금 봤을 때 덜 가치 있게 느껴지고, 주가가 떨어지는 경향이 있어요.',
+    scenarios:[
+      {
+        tag:'📈 금리 상승', cls:'dn', title:'주식보다 채권이 매력적으로 보여요',
+        chain:[
+          {text:'국채 금리 상승 → 은행 예금·채권도 이자가 높아짐'},
+          {text:'"굳이 위험한 주식 안 해도 되겠다" → <em>주식 매도</em>'},
+          {text:'기업 대출 이자 증가 → 투자 줄이고 이익 감소'},
+          {text:'특히 미래 이익을 먹고 사는 성장주(기술주) 직격탄'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>NVDA·애플·네이버 같은 성장주에 특히 타격이 커요.</b> 반면 은행·보험·가치주(PER이 낮은 전통 산업)는 오히려 수혜를 받아요. 금리 방향이 바뀌는 시점을 잘 봐야 해요.',
+        analogy:'은행 적금 금리가 5%가 되면 굳이 주식을 할 이유가 줄어드는 것처럼, 금리가 오르면 주식 매력이 상대적으로 떨어져요.',
+      },
+      {
+        tag:'📉 금리 하락', cls:'up', title:'주식에 돈이 몰려들어요',
+        chain:[
+          {text:'금리 하락 → 예금·채권 이자 감소'},
+          {text:'"이 이자 받느니 주식이 낫겠다" → <em>주식 시장으로 자금 유입</em>'},
+          {text:'기업 대출 이자 감소 → 투자 확대, 이익 증가'},
+          {text:'성장주 밸류에이션 개선 → 주가 상승'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>기술주·성장주에게 최고의 환경이에요.</b> 2020~2021년 초저금리 시절에 테슬라·네이버 등이 폭등했던 게 이 원리예요. 금리 인하 사이클이 시작되면 성장주 반등이 빠른 경향이 있어요.',
+        analogy:'마트에서 할인 행사를 하면 사람들이 몰리는 것처럼, 금리가 낮아지면 주식 시장에 돈이 몰려요.',
+      },
+    ]
+  },
+  {
+    icon:'💱', title:'원달러 환율 (USD/KRW)', sub:'외국인 자금 흐름의 창문',
+    what:'환율은 <strong>외국인 투자자에게 한국 주식이 비싸 보이는지 싸 보이는지</strong>를 결정해요. 외국인이 사면 코스피가 오르고, 팔면 내려가는 구조예요.',
+    scenarios:[
+      {
+        tag:'원화 약세 (환율↑)', cls:'dn', title:'외국인이 한국 주식을 팔고 나가요',
+        chain:[
+          {text:'달러가 강해지면 원화 가치 하락 (환율 상승, 예: 1,300→1,400원)'},
+          {text:'외국인 입장: "한국 주식 팔면 달러로 환전 시 손해" → <em>팔자!</em>'},
+          {text:'외국인 순매도 → 코스피·코스닥 하락 압력'},
+          {text:'단, 삼성·현대차 등 <em>수출기업</em>은 달러로 번 돈이 더 많아짐 → 수익 증가'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>전반적으로 코스피가 흔들려요.</b> 수출 비중 높은 대기업(삼성전자·SK하이닉스·현대차)은 오히려 환율 수혜를 받아요. 반면 원자재 수입 비중이 높은 기업은 원가 부담이 커져요.',
+        analogy:'해외 여행객 입장에서 환율이 오르면 한국 물건이 더 싸 보이는 것처럼, 외국인에겐 한국 주식이 상대적으로 싸 보여요. 하지만 환전 손실이 싫어서 안 사는 경우가 많아요.',
+      },
+      {
+        tag:'원화 강세 (환율↓)', cls:'up', title:'외국인이 한국 주식을 적극적으로 사요',
+        chain:[
+          {text:'원화 가치 상승 (환율 하락, 예: 1,400→1,300원)'},
+          {text:'외국인 입장: "한국 주식 사서 팔면 달러로 환전 시 이득" → <em>사자!</em>'},
+          {text:'외국인 순매수 → 코스피 상승 지원'},
+          {text:'내수·수입 업종 (대형마트, 항공) 원가 감소로 수혜'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>코스피 전반이 오르는 환경이에요.</b> 삼성전자보다는 LG생활건강·이마트 같은 내수 기업이 더 크게 수혜를 받는 경향이 있어요.',
+        analogy:'한국으로 여행 오는 외국인에게 원화 강세는 여행 물가가 비싸진다는 의미지만, 주식 투자로는 환차익을 챙길 수 있어서 오히려 사고 싶어져요.',
+      },
+    ]
+  },
+  {
+    icon:'😰', title:'공포·탐욕 지수 (CNN)', sub:'투자자 심리 온도계 · 0(극공포)~100(극탐욕)',
+    what:'<strong>지금 투자자들이 얼마나 두려워하는지, 욕심을 부리는지</strong>를 수치로 보여줘요. 역설적으로 극공포에 사고 극탐욕에 파는 게 역사적으로 더 수익률이 좋았어요.',
+    scenarios:[
+      {
+        tag:'0~25 극공포 😱', cls:'dn', title:'다들 겁먹고 팔고 있어요',
+        chain:[
+          {text:'악재가 쏟아지며 투자자들이 앞다투어 매도'},
+          {text:'주가가 실제 가치보다 <em>싸게 떨어지는</em> 과매도 구간'},
+          {text:'워런 버핏 명언: "남들이 두려워할 때 탐욕스러워라"'},
+          {text:'역사적으로 극공포 구간은 중장기 저점 근처'},
+        ],
+        impact:'pos', impactIcon:'💡',
+        impactText:'<b>역설적으로 좋은 주식을 싸게 살 기회예요.</b> 단, 떨어지는 칼날을 잡는 거라 단기적으로 더 내릴 수 있어요. 한 번에 다 사지 말고 분할 매수가 좋아요.',
+        analogy:'"모두가 우산을 팔 때 사고, 모두가 살 때 팔아라." 극공포는 우산이 제일 싼 순간이에요.',
+      },
+      {
+        tag:'76~100 극탐욕 🤑', cls:'up', title:'다들 흥분해서 사고 있어요',
+        chain:[
+          {text:'주가가 많이 올라 뉴스마다 "주식 대박" 기사'},
+          {text:'주변 사람들도 주식 이야기를 많이 함 → 과열 신호'},
+          {text:'실제 가치보다 <em>비싸게 올라간</em> 과매수 상태'},
+          {text:'역사적으로 극탐욕 후 큰 조정이 온 경우 많음'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>이때 새로 사는 건 위험해요.</b> 이미 가진 주식이라면 수익을 일부 실현하는 것도 좋은 전략이에요. "내 주변 사람들이 주식 얘기를 하기 시작했다"는 것 자체가 꼭대기 신호일 수 있어요.',
+        analogy:'택시 기사님이 주식 추천을 시작하면 팔 때라는 말, 들어보셨나요? 극탐욕이 그 순간이에요.',
+      },
+    ]
+  },
+  {
+    icon:'₿', title:'비트코인 (BTC)', sub:'위험자산 심리 바로미터 · 나스닥과 동행',
+    what:'비트코인은 <strong>"투자자들이 얼마나 과감하게 위험을 감수하는지"</strong>를 보여줘요. 주식, 특히 나스닥과 비슷하게 움직이는 경향이 있어요.',
+    scenarios:[
+      {
+        tag:'📈 BTC 급등', cls:'up', title:'위험자산에 돈이 몰리고 있어요',
+        chain:[
+          {text:'유동성 풍부하고 투자 심리가 살아남'},
+          {text:'주식·코인 모두 "사도 될 것 같다" → <em>자금 유입</em>'},
+          {text:'나스닥·성장주도 함께 오르는 경향'},
+          {text:'기관 투자자들의 코인 매수 → 주식 시장 전반 낙관'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>BTC 강세는 보통 기술주·성장주에게도 좋은 신호예요.</b> 특히 NVDA·애플·카카오 같은 성장 기업들이 함께 오르는 경향이 있어요.',
+        analogy:'파티가 신나게 열리면 다들 흥청망청 쓰는 것처럼, BTC 급등은 시장 파티 분위기를 보여줘요.',
+      },
+      {
+        tag:'📉 BTC 급락', cls:'dn', title:'위험 자산에서 돈이 빠져나가요',
+        chain:[
+          {text:'유동성 부족 or 큰 악재 발생'},
+          {text:'투자자들이 <em>가장 투기적인 자산</em>(코인)부터 먼저 처분'},
+          {text:'다음으로 성장주·기술주도 매도 압력'},
+          {text:'현금·채권·달러 등 안전 자산으로 이동'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>BTC 급락은 나스닥·기술주 조정의 전조일 수 있어요.</b> 특히 BTC가 먼저 20~30% 빠지고 며칠 후 나스닥이 따라 빠지는 패턴이 역사적으로 반복됐어요. 빠른 경고 신호로 활용하세요.',
+        analogy:'파티가 끝나갈 때 제일 먼저 나가는 사람들이 있는 것처럼, BTC가 먼저 하락하면 주식 파티도 곧 끝날 수 있어요.',
+      },
+    ]
+  },
+  {
+    icon:'🏭', title:'구리 (Copper)', sub:'"닥터 코퍼" — 경기 선행 지표',
+    what:'구리는 <strong>건물·자동차·전자제품 등 거의 모든 것에 들어가요.</strong> 그래서 구리 수요가 높다 = 세계 경제가 활발하다는 뜻이에요. "닥터 코퍼"라고 불릴 만큼 경기를 잘 예측해요.',
+    scenarios:[
+      {
+        tag:'📈 구리값 상승', cls:'up', title:'세계 공장이 바쁘게 돌아가고 있어요',
+        chain:[
+          {text:'중국·미국 제조업 활황 → 구리 수요 급증'},
+          {text:'인프라 투자 확대 → <em>산업 전반 수요</em> 증가'},
+          {text:'원자재·산업재 업종 강세'},
+          {text:'글로벌 경기 확장 신호 → 주식 시장 전반 긍정적'},
+        ],
+        impact:'pos', impactIcon:'✅',
+        impactText:'<b>POSCO·고려아연 같은 소재주와 두산밥캣 같은 산업재주에 호재예요.</b> 전기차 시대에는 배터리·전선 수요로 구리 소비가 더 늘어나서 2차전지 업종과도 연결돼요.',
+        analogy:'건설 현장이 많으면 철근·구리 소비가 늘듯, 경기가 좋으면 구리가 먼저 들썩여요.',
+      },
+      {
+        tag:'📉 구리값 하락', cls:'dn', title:'세계 경기가 식고 있다는 신호예요',
+        chain:[
+          {text:'중국 경기 둔화 or 글로벌 제조업 수축'},
+          {text:'구리 수요 감소 → 가격 하락'},
+          {text:'경기침체 우려 확산 → <em>원자재·신흥국 전반</em> 약세'},
+          {text:'수출 의존도 높은 한국 기업들도 타격'},
+        ],
+        impact:'neg', impactIcon:'⚠️',
+        impactText:'<b>한국처럼 제조업·수출 비중이 높은 나라의 주식에 특히 부정적이에요.</b> 코스피가 중국 경기와 연동되어 있는 만큼, 구리 하락 = 코스피 조정 신호로 자주 쓰여요.',
+        analogy:'건설 경기가 얼어붙으면 철물점 매출도 떨어지는 것처럼, 구리 가격이 내리면 세계 경기 둔화를 예고해요.',
+      },
+    ]
+  },
+];
+
+function renderDictionary(){
+  const g=document.getElementById('dict-grid');
+  if(g.innerHTML.trim()) return;
+  g.innerHTML=DICT_DATA.map(card=>`
+    <div class="dict-card">
+      <div class="dc-head">
+        <div class="dc-icon">${card.icon}</div>
+        <div class="dc-head-text">
+          <div class="dc-title">${card.title}</div>
+          <div class="dc-sub">${card.sub}</div>
+        </div>
+      </div>
+      <div class="dc-what">${card.what}</div>
+      <div class="dc-body">
+        ${card.scenarios.map(s=>`
+        <div class="dc-scenario">
+          <div class="dc-sc-header">
+            <span class="dc-tag ${s.cls}">${s.tag}</span>
+            <span class="dc-sc-title">${s.title}</span>
+          </div>
+          <div class="dc-chain">
+            ${s.chain.map((c,i)=>`<div class="dc-chain-step"><span class="dc-chain-arrow">${i===0?'':'↓'}</span><span class="dc-chain-text">${c.text}</span></div>`).join('')}
+          </div>
+          <div class="dc-impact ${s.impact}">
+            <span class="dc-impact-icon">${s.impactIcon}</span>
+            <div class="dc-impact-text">내 주식에 미치는 영향: ${s.impactText}</div>
+          </div>
+          <div class="dc-analogy">${s.analogy}</div>
+        </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+// ══════════════════════════════════════════════
+// TAB 3: 종목 분석
+// ══════════════════════════════════════════════
+function setTicker(t){
+  document.getElementById('ticker-input').value=t;
+  runAnalysis();
+}
+
+function sma(arr,n){ return arr.length<n?null:arr.slice(-n).reduce((a,b)=>a+b,0)/n; }
+function ema(arr,n){
+  if(arr.length<n) return null;
+  const k=2/(n+1); let e=arr.slice(0,n).reduce((a,b)=>a+b,0)/n;
+  for(let i=n;i<arr.length;i++) e=arr[i]*k+e*(1-k);
+  return e;
+}
+function rsi(closes,n=14){
+  if(closes.length<n+1) return null;
+  const diffs=closes.slice(1).map((v,i)=>v-closes[i]);
+  const recent=diffs.slice(-n);
+  const gains=recent.map(d=>d>0?d:0);
+  const losses=recent.map(d=>d<0?-d:0);
+  const ag=gains.reduce((a,b)=>a+b,0)/n;
+  const al=losses.reduce((a,b)=>a+b,0)/n;
+  return al===0?100:100-100/(1+ag/al);
+}
+function macd(closes){
+  const e12=ema(closes,12), e26=ema(closes,26);
+  if(!e12||!e26) return null;
+  return {macd:e12-e26, signal:null};
+}
+function bollingerBands(closes,n=20){
+  if(closes.length<n) return null;
+  const slice=closes.slice(-n);
+  const mean=slice.reduce((a,b)=>a+b,0)/n;
+  const std=Math.sqrt(slice.map(v=>(v-mean)**2).reduce((a,b)=>a+b,0)/n);
+  return {upper:mean+2*std, middle:mean, lower:mean-2*std, std};
+}
+function stochastic(closes,highs,lows,n=14){
+  if(closes.length<n||highs.length<n||lows.length<n) return null;
+  const hh=Math.max(...highs.slice(-n));
+  const ll=Math.min(...lows.slice(-n));
+  if(hh===ll) return 50;
+  return (closes[closes.length-1]-ll)/(hh-ll)*100;
+}
+
+async function runAnalysis(){
+  const raw=document.getElementById('ticker-input').value.trim().toUpperCase();
+  if(!raw) return;
+  const res=document.getElementById('analysis-result');
+  res.style.display='block';
+  res.innerHTML=`<div style="padding:40px;text-align:center;color:var(--muted)"><span class="spinner"></span> ${raw} 데이터 분석 중...</div>`;
+
+  const [d3m, d1y, d5y] = await Promise.all([
+    fetchQ(raw,'3mo'), fetchQ(raw,'1y'), fetchQ(raw,'5y')
+  ]);
+
+  if(!d3m?.closes?.length){
+    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>Yahoo Finance 심볼을 확인해주세요. (예: 삼성전자 → 005930.KS, 비트코인 → BTC-USD)</div></div>`;
+    return;
+  }
+
+  const meta = d3m.meta;
+  const name = meta?.longName||meta?.shortName||raw;
+  const currency = meta?.currency||'USD';
+  const price = d3m.closes[d3m.closes.length-1];
+  const prev  = d3m.closes[d3m.closes.length-2]||price;
+  const pct   = (price-prev)/prev*100;
+  const {t:chgT, c:chgC} = chgInfo(pct);
+
+  const c3m=d3m.closes, h3m=d3m.highs||[], l3m=d3m.lows||[];
+  const c1y=d1y?.closes||c3m;
+  const c5y=d5y?.closes||c1y;
+
+  const rsi14   = rsi(c3m);
+  const ma5     = sma(c3m,5);
+  const ma20    = sma(c3m,20);
+  const bb      = bollingerBands(c3m,20);
+  const stoK    = stochastic(c3m,h3m,l3m,14);
+
+  const ma50    = sma(c1y,50);
+  const ma120   = sma(c1y,120);
+  const rsi21   = rsi(c1y,21);
+  const macdVal = macd(c1y);
+
+  const ma200   = sma(c5y,200);
+  const high52w = c1y.length? Math.max(...c1y):price;
+  const low52w  = c1y.length? Math.min(...c1y):price;
+  const fromHigh= (price-high52w)/high52w*100;
+  const fromLow = (price-low52w)/low52w*100;
+
+  function sigClass(v,good,bad,inv=false){
+    if(v==null) return 'flat';
+    if(inv){ return v<=good?'up':v>=bad?'dn':'flat'; }
+    return v>=good?'up':v<=bad?'dn':'flat';
+  }
+  function sigLabel(cls){ return cls==='up'?'매수신호':cls==='dn'?'매도신호':'중립'; }
+
+  let score=50;
+  const signals=[];
+
+  if(rsi14!=null){
+    if(rsi14<30){ score+=20; signals.push('RSI 과매도(바닥 신호)'); }
+    else if(rsi14<40){ score+=10; signals.push('RSI 저점권'); }
+    else if(rsi14>70){ score-=20; signals.push('RSI 과매수(천장 신호)'); }
+    else if(rsi14>60){ score-=10; signals.push('RSI 고점권'); }
+  }
+  if(bb&&price!=null){
+    if(price<=bb.lower){ score+=15; signals.push('볼린저 하단 터치(반등 가능)'); }
+    else if(price>=bb.upper){ score-=15; signals.push('볼린저 상단 돌파(과열 가능)'); }
+  }
+  if(ma5&&ma20){
+    if(ma5>ma20){ score+=10; signals.push('단기 MA 골든크로스'); }
+    else { score-=10; signals.push('단기 MA 데드크로스'); }
+  }
+  if(fromHigh<-40){ score+=15; signals.push('52주 고점 대비 -40%+ 낙폭 과대'); }
+  else if(fromHigh>-5){ score-=10; signals.push('52주 신고가 근접 (모멘텀)'); }
+  if(ma50&&ma120){
+    if(ma50>ma120){ score+=5; } else { score-=5; }
+  }
+
+  score=Math.max(0,Math.min(100,score));
+
+  let evalType,evalTitle,evalIcon,evalDesc;
+  if(score>=75){
+    evalType='buy'; evalIcon='📉→📈'; evalTitle='바닥권 신호';
+    evalDesc=`기술적 지표들이 <b>바닥권 진입 가능성</b>을 시사합니다. RSI 과매도, 볼린저 하단 등 반등 신호가 감지됩니다.<br><br><b>주의:</b> 기술적 신호만으로 매수 결정은 금물. 펀더멘털과 매크로 환경도 함께 확인하세요. 분할 매수 전략이 유효합니다.`;
+  } else if(score>=60){
+    evalType='buy'; evalIcon='🟢'; evalTitle='완만한 상승 우호';
+    evalDesc=`단기~중기 지표가 <b>매수 우호적</b> 환경을 가리킵니다. 추세가 상승 방향이나 급격한 모멘텀은 아닙니다.<br><br>분할 매수 또는 기존 보유 포지션 유지가 적절합니다.`;
+  } else if(score>=40){
+    evalType='neutral'; evalIcon='⚖️'; evalTitle='중립 — 방향성 불명확';
+    evalDesc=`지표들이 <b>뚜렷한 방향성을 보이지 않는</b> 중립 구간입니다. 상승·하락 신호가 혼재합니다.<br><br>신규 진입보다 관망하거나, 포지션이 있다면 보유 유지를 권장합니다.`;
+  } else if(score>=25){
+    evalType='caution'; evalIcon='⚠️'; evalTitle='주의 — 하락 압력';
+    evalDesc=`여러 지표가 <b>단기 하락 압력</b>을 경고하고 있습니다. 과매수 신호나 추세 약화 징후가 감지됩니다.<br><br>신규 매수 자제, 보유 포지션 일부 축소 고려. 손절선 설정을 권장합니다.`;
+  } else {
+    evalType='sell'; evalIcon='📈→📉'; evalTitle='천장권 신호';
+    evalDesc=`기술적 지표들이 <b>천장권 진입 가능성</b>을 시사합니다. RSI 과매수, 볼린저 상단 돌파 등 과열 신호가 다수 감지됩니다.<br><br><b>주의:</b> 차익 실현 고려, 신규 매수 자제. 단, 강한 상승 추세 중에는 천장 신호가 자주 나오므로 트레일링 스탑 활용.`;
+  }
+
+  const N=(v,d=2)=>v!=null&&!isNaN(v)?v.toFixed(d):'—';
+  const SC=(v,g,b,inv=false)=>sigLabel(sigClass(v,g,b,inv));
+  const CC=(v,g,b,inv=false)=>sigClass(v,g,b,inv);
+
+  res.innerHTML=`
+    <div class="stock-hero">
+      <div>
+        <div class="sh-name">${name}</div>
+        <div class="sh-ticker">${raw} · ${currency}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="sh-price">${fmt(price)}</div>
+        <div class="sh-chg ${chgC}">${chgT}</div>
+      </div>
+    </div>
+
+    <div class="eval-banner ${evalType}">
+      <div class="eb-top">
+        <div class="eb-icon">${evalIcon}</div>
+        <div class="eb-title">${evalTitle}</div>
+        <span class="eb-badge" style="background:var(--${evalType==='buy'?'up-bg':evalType==='sell'?'dn-bg':evalType==='caution'?'warn-bg':'faint'});color:var(--${evalType==='buy'?'up':evalType==='sell'?'dn':evalType==='caution'?'warn':'flat'})">종합 점수 ${score}/100</span>
+      </div>
+      <div class="eb-desc">${evalDesc}</div>
+      ${signals.length?`<div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${signals.map(s=>`<span style="font-size:11px;padding:2px 9px;border-radius:99px;background:var(--faint);border:1px solid var(--border);color:var(--muted)">${s}</span>`).join('')}</div>`:''}
+    </div>
+
+    <div class="indicator-grid">
+      <div class="ind-card" style="--period-color:#6366f1">
+        <div class="ind-period">단기 지표 (3개월)</div>
+        <div class="ind-rows">
+          <div class="ind-row"><span class="ind-lbl">RSI(14)</span><span class="ind-val">${N(rsi14)}</span><span class="ind-sig ${CC(rsi14,30,70,true)}">${SC(rsi14,30,70,true)}</span></div>
+          <div class="ind-row"><span class="ind-lbl">스토캐스틱</span><span class="ind-val">${N(stoK)}</span><span class="ind-sig ${CC(stoK,20,80,true)}">${SC(stoK,20,80,true)}</span></div>
+          <div class="ind-row"><span class="ind-lbl">MA5</span><span class="ind-val">${N(ma5)}</span><span class="ind-sig ${price&&ma5?CC(price,ma5*1.001,ma5*0.999):'flat'}">${price&&ma5?SC(price,ma5*1.001,ma5*0.999):'—'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">MA20</span><span class="ind-val">${N(ma20)}</span><span class="ind-sig ${price&&ma20?CC(price,ma20*1.001,ma20*0.999):'flat'}">${price&&ma20?SC(price,ma20*1.001,ma20*0.999):'—'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">BB 상단</span><span class="ind-val">${N(bb?.upper)}</span><span class="ind-sig flat">-</span></div>
+          <div class="ind-row"><span class="ind-lbl">BB 하단</span><span class="ind-val">${N(bb?.lower)}</span><span class="ind-sig flat">-</span></div>
+        </div>
+      </div>
+      <div class="ind-card" style="--period-color:#34d399">
+        <div class="ind-period">중기 지표 (1년)</div>
+        <div class="ind-rows">
+          <div class="ind-row"><span class="ind-lbl">RSI(21)</span><span class="ind-val">${N(rsi21)}</span><span class="ind-sig ${CC(rsi21,30,70,true)}">${SC(rsi21,30,70,true)}</span></div>
+          <div class="ind-row"><span class="ind-lbl">MA50</span><span class="ind-val">${N(ma50)}</span><span class="ind-sig ${price&&ma50?CC(price,ma50*1.001,ma50*0.999):'flat'}">${price&&ma50?SC(price,ma50*1.001,ma50*0.999):'—'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">MA120</span><span class="ind-val">${N(ma120)}</span><span class="ind-sig ${price&&ma120?CC(price,ma120*1.001,ma120*0.999):'flat'}">${price&&ma120?SC(price,ma120*1.001,ma120*0.999):'—'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">MACD</span><span class="ind-val">${N(macdVal?.macd)}</span><span class="ind-sig ${macdVal?CC(macdVal.macd,0,-0.01):'flat'}">${macdVal?SC(macdVal.macd,0,-0.01):'—'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">52주 고점</span><span class="ind-val">${N(high52w)}</span><span class="ind-sig flat">-</span></div>
+          <div class="ind-row"><span class="ind-lbl">52주 저점</span><span class="ind-val">${N(low52w)}</span><span class="ind-sig flat">-</span></div>
+        </div>
+      </div>
+      <div class="ind-card" style="--period-color:#fbbf24">
+        <div class="ind-period">장기 지표 (5년)</div>
+        <div class="ind-rows">
+          <div class="ind-row"><span class="ind-lbl">MA200</span><span class="ind-val">${N(ma200)}</span><span class="ind-sig ${price&&ma200?CC(price,ma200*1.001,ma200*0.999):'flat'}">${price&&ma200?SC(price,ma200*1.001,ma200*0.999):'—'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">고점 대비</span><span class="ind-val">${N(fromHigh)}%</span><span class="ind-sig ${CC(fromHigh,-5,-40)}">${fromHigh>-5?'고점근접':fromHigh<-40?'낙폭과대':'중립'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">저점 대비</span><span class="ind-val">+${N(fromLow)}%</span><span class="ind-sig ${CC(fromLow,100,10)}">${fromLow>100?'강한추세':fromLow<15?'저점근접':'중립'}</span></div>
+          <div class="ind-row"><span class="ind-lbl">현재가</span><span class="ind-val">${fmt(price)}</span><span class="ind-sig flat">-</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="score-panel">
+      <div class="score-label">종합 기술적 점수 — 0(극단 하락신호) ~ 100(극단 상승신호)</div>
+      <div class="score-bar-wrap">
+        <div class="score-track">
+          <div class="score-pointer" style="left:${score}%;border-color:${score>=60?'var(--up)':score<=40?'var(--dn)':'var(--warn)'}"></div>
+        </div>
+        <div class="score-num" style="color:${score>=60?'var(--up)':score<=40?'var(--dn)':'var(--warn)'}">${score}</div>
+      </div>
+      <div class="score-ticks"><span>매도 (0)</span><span>하락우세 (25)</span><span>중립 (50)</span><span>상승우세 (75)</span><span>매수 (100)</span></div>
+    </div>`;
+}
+
+// ── 초기 실행 ────────────────────────────────
+loadDashboard();
+setInterval(loadDashboard, 5*60*1000);
+</script>
+</body>
+</html>
