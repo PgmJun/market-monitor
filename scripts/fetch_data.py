@@ -59,16 +59,27 @@ def chart(sym, rng):
             j = json.loads(get(url))
             res = j["chart"]["result"][0]
             qd = res["indicators"]["quote"][0]
-            rows = [(c, h, l, v) for c, h, l, v in zip(
-                qd.get("close") or [], qd.get("high") or [],
-                qd.get("low") or [], qd.get("volume") or [])
-                if c is not None]
+            ts = res.get("timestamp") or []
+            col = lambda k: qd.get(k) or []  # noqa: E731
+            O, H, L, C, V = col("open"), col("high"), col("low"), col("close"), col("volume")
+            at = lambda a, i: a[i] if i < len(a) else None  # noqa: E731
+            rows = []  # aligned per bar: (t, o, h, l, c, v)
+            for i in range(len(C)):
+                c = C[i]
+                if c is None:
+                    continue
+                o, h, lo = at(O, i), at(H, i), at(L, i)
+                rows.append((at(ts, i), o if o is not None else c,
+                             h if h is not None else c, lo if lo is not None else c,
+                             c, at(V, i) or 0))
             m = res.get("meta", {})
             return {
-                "closes": [r4(r[0]) for r in rows],
-                "highs": [r4(r[1]) for r in rows if r[1] is not None],
-                "lows": [r4(r[2]) for r in rows if r[2] is not None],
-                "vols": [int(r[3]) for r in rows if r[3]],
+                "t": [r[0] for r in rows],
+                "opens": [r4(r[1]) for r in rows],
+                "highs": [r4(r[2]) for r in rows],
+                "lows": [r4(r[3]) for r in rows],
+                "closes": [r4(r[4]) for r in rows],
+                "vols": [int(r[5]) for r in rows],
                 "meta": {k: m.get(k) for k in (
                     "symbol", "longName", "shortName", "currency",
                     "regularMarketPrice", "chartPreviousClose",
@@ -171,6 +182,9 @@ def main():
                 old = json.load(f)
             age = datetime.now(timezone.utc) - datetime.fromisoformat(old["updated"])
             stale = age.total_seconds() > 3 * 3600
+            first = next(iter(old["symbols"].values()), {})
+            if "opens" not in first or "t" not in first:
+                stale = True  # 구버전 포맷 → 즉시 재수집
         except Exception:  # noqa: BLE001
             stale = True
     if stale or os.environ.get("FORCE_HISTORY"):

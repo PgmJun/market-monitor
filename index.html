@@ -219,6 +219,18 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0
 .score-num{font-family:var(--mono);font-size:22px;font-weight:600;min-width:44px;text-align:right}
 .score-ticks{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono)}
 
+
+/* 종목 차트 (캔들 + 이평선 + 일목구름 + 스토캐스틱 3단) */
+.chart-panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px 12px;margin-bottom:20px}
+.chart-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.chart-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);font-family:var(--mono)}
+.chart-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+.chart-periods{display:flex;gap:4px}
+.chart-periods button{background:var(--faint);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:4px 10px;border-radius:7px;cursor:pointer;font-family:var(--sans)}
+.chart-periods button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chart-wrap{position:relative;width:100%}
+#stk-canvas{display:block;width:100%;touch-action:pan-y}
+
 /* 면책 */
 .disclaimer{font-size:11px;color:var(--muted);background:var(--faint);border:1px solid var(--border);border-radius:9px;padding:10px 14px;line-height:1.6}
 
@@ -391,7 +403,7 @@ const RANGE_BARS={'2d':5,'5d':5,'3mo':63,'6mo':126,'1y':252,'5y':99999};
 function sliceSeries(d,range){
   const n=RANGE_BARS[range]||99999;
   const tail=a=>(a||[]).slice(-n);
-  return {closes:tail(d.closes),highs:tail(d.highs),lows:tail(d.lows),vols:tail(d.vols),meta:d.meta};
+  return {t:tail(d.t),opens:tail(d.opens),closes:tail(d.closes),highs:tail(d.highs),lows:tail(d.lows),vols:tail(d.vols),meta:d.meta};
 }
 
 const INDICES = [
@@ -448,11 +460,14 @@ async function fetchQ(sym,range='2d'){
     if(!text) return null;
     const j=JSON.parse(text);
     const res=j.chart.result[0];
-    const closes=res.indicators.quote[0].close.filter(Boolean);
-    const highs=res.indicators.quote[0].high?.filter(Boolean)||[];
-    const lows=res.indicators.quote[0].low?.filter(Boolean)||[];
-    const vols=res.indicators.quote[0].volume?.filter(Boolean)||[];
-    cache[key]={ts:Date.now(),d:{closes,highs,lows,vols,meta:res.meta}};
+    const q=res.indicators.quote[0], T=res.timestamp||[];
+    const t=[],opens=[],highs=[],lows=[],closes=[],vols=[];
+    (q.close||[]).forEach((c,i)=>{
+      if(c==null) return;
+      t.push(T[i]??null); closes.push(c);
+      opens.push(q.open?.[i]??c); highs.push(q.high?.[i]??c); lows.push(q.low?.[i]??c); vols.push(q.volume?.[i]||0);
+    });
+    cache[key]={ts:Date.now(),d:{t,opens,closes,highs,lows,vols,meta:res.meta}};
     return cache[key].d;
   }catch{return null;}
 }
@@ -1103,6 +1118,16 @@ async function runAnalysis(){
       </div>
     </div>
 
+    <div class="chart-panel">
+      <div class="chart-top">
+        <div class="chart-legend" id="chart-legend"></div>
+        <div class="chart-periods" id="chart-periods">
+          <button data-p="6m">6개월</button><button data-p="1y" class="on">1년</button><button data-p="2y">2년</button><button data-p="5y">5년</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="stk-canvas"></canvas></div>
+    </div>
+
     <div class="eval-banner ${evalType}">
       <div class="eb-top">
         <div class="eb-icon">${evalIcon}</div>
@@ -1157,7 +1182,259 @@ async function runAnalysis(){
       </div>
       <div class="score-ticks"><span>매도 (0)</span><span>하락우세 (25)</span><span>중립 (50)</span><span>상승우세 (75)</span><span>매수 (100)</span></div>
     </div>`;
+  const chartData=[d5y,d1y,d3m].find(x=>x?.t?.length&&x.opens?.length)||null;
+  initStockChart(chartData);
 }
+
+// ══════════════════════════════════════════════
+// 종목 차트: 캔들 + 이동평균선 + 일목 구름대 + 스토캐스틱(단기/중기/장기)
+// ══════════════════════════════════════════════
+const MA_DEFS=[[5,'#d946ef',1.2],[10,'#3b4cca',1.2],[20,'#f0a430',1.8],[60,'#2e9e4f',1.8],[120,'#8b4513',1.8],[240,'#b8a2e3',1.8],[480,'#e03131',2.4]];
+const STO_DEFS=[{name:'단기',n:5,m:3,t:3},{name:'중기',n:10,m:6,t:6},{name:'장기',n:20,m:12,t:12}];
+const UP_C='#e5383b', DN_C='#2563eb', CLOUD_SHIFT=26;
+const PERIOD_BARS={'6m':126,'1y':252,'2y':504,'5y':1e9};
+let CH=null; // {d, ma, cloudA, cloudB, sto, period, hover}
+
+// 연속된 n개 값이 모두 있을 때만 평균 (앞부분 null 허용)
+function smaN(a,n){
+  const out=new Array(a.length).fill(null); let s=0,k=0;
+  for(let i=0;i<a.length;i++){
+    if(a[i]==null){s=0;k=0;continue;}
+    s+=a[i];k++;
+    if(k>n){s-=a[i-n];k=n;}
+    if(k===n) out[i]=s/n;
+  }
+  return out;
+}
+function rollHL(h,l,i,n){
+  if(i<n-1) return null;
+  let hh=-Infinity,ll=Infinity;
+  for(let j=i-n+1;j<=i;j++){if(h[j]>hh)hh=h[j];if(l[j]<ll)ll=l[j];}
+  return [hh,ll];
+}
+function slowStoch(d,n,m,t){
+  const fast=d.closes.map((c,i)=>{const r=rollHL(d.highs,d.lows,i,n);if(!r)return null;return r[0]===r[1]?50:(c-r[1])/(r[0]-r[1])*100;});
+  const k=smaN(fast,m); return {k, d:smaN(k,t)};
+}
+function computeChart(d){
+  const L=d.closes.length;
+  const ma=MA_DEFS.map(([n])=>smaN(d.closes,n));
+  const cloudA=new Array(L+CLOUD_SHIFT).fill(null), cloudB=new Array(L+CLOUD_SHIFT).fill(null);
+  for(let i=0;i<L;i++){
+    const t9=rollHL(d.highs,d.lows,i,9), k26=rollHL(d.highs,d.lows,i,26), s52=rollHL(d.highs,d.lows,i,52);
+    if(t9&&k26) cloudA[i+CLOUD_SHIFT]=((t9[0]+t9[1])/2+(k26[0]+k26[1])/2)/2;
+    if(s52) cloudB[i+CLOUD_SHIFT]=(s52[0]+s52[1])/2;
+  }
+  const sto=STO_DEFS.map(s=>slowStoch(d,s.n,s.m,s.t));
+  return {ma,cloudA,cloudB,sto};
+}
+
+function initStockChart(d){
+  const panel=document.querySelector('.chart-panel');
+  if(!panel) return;
+  if(!d||d.closes.length<30){panel.innerHTML='<div style="padding:20px;color:var(--muted);font-size:13px">차트를 그릴 데이터가 부족합니다.</div>';return;}
+  const L=d.closes.length;
+  CH={d,...computeChart(d),period:L>=400?'1y':'5y',hover:null};
+  document.getElementById('chart-legend').innerHTML=
+    MA_DEFS.filter(([n])=>n<L).map(([n,c])=>`<span><i style="background:${c}"></i>${n}일</span>`).join('')+
+    `<span><i style="background:rgba(103,232,249,.55);height:8px"></i>일목 구름</span>`;
+  const btns=document.querySelectorAll('#chart-periods button');
+  btns.forEach(b=>{
+    b.classList.toggle('on',b.dataset.p===CH.period);
+    b.onclick=()=>{CH.period=b.dataset.p;CH.hover=null;btns.forEach(x=>x.classList.toggle('on',x===b));drawStockChart();};
+  });
+  const cv=document.getElementById('stk-canvas');
+  const onMove=e=>{
+    if(!CH?.geo) return;
+    const r=cv.getBoundingClientRect(), x=e.clientX-r.left, g=CH.geo;
+    const i=g.start+Math.floor(x/g.xw);
+    CH.hover=(x>=0&&x<g.plotW&&i>=g.start&&i<g.L)?i:null;
+    if(!CH.raf) CH.raf=requestAnimationFrame(()=>{CH.raf=null;drawStockChart();});
+  };
+  cv.onpointermove=onMove; cv.onpointerdown=onMove;
+  cv.onpointerleave=()=>{CH.hover=null;drawStockChart();};
+  drawStockChart();
+}
+
+function drawStockChart(){
+  if(!CH) return;
+  const cv=document.getElementById('stk-canvas'); if(!cv) return;
+  const {d,ma,cloudA,cloudB,sto}=CH;
+  const css=getComputedStyle(document.documentElement);
+  const V=n=>css.getPropertyValue(n).trim();
+  const TEXT=V('--text'), MUTED=V('--muted'), GRID=V('--border'), BG=V('--surface');
+  const W=cv.parentElement.clientWidth;
+  if(W<50) return;
+  const MAIN_H=Math.round(Math.max(260,Math.min(420,W*0.48))), STO_H=78, LBL=22, AXIS=22;
+  const H=MAIN_H+STO_DEFS.length*(LBL+STO_H)+AXIS;
+  const dpr=window.devicePixelRatio||1;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
+  const ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle=BG; ctx.fillRect(0,0,W,H);
+
+  const L=d.closes.length, start=Math.max(0,L-PERIOD_BARS[CH.period]);
+  const fut=Math.round((L-start)*0.04)+4; // 구름대가 살짝 앞으로 보이도록 여백
+  const AXW=62, plotW=W-AXW, slots=(L-start)+fut, xw=plotW/slots;
+  CH.geo={start,L,xw,plotW};
+  const X=i=>(i-start+0.5)*xw;
+
+  // ── 가격 범위
+  let hi=-Infinity, lo=Infinity;
+  for(let i=start;i<L;i++){hi=Math.max(hi,d.highs[i]);lo=Math.min(lo,d.lows[i]);}
+  ma.forEach(a=>{for(let i=start;i<L;i++) if(a[i]!=null){hi=Math.max(hi,a[i]);lo=Math.min(lo,a[i]);}});
+  for(let i=start;i<Math.min(L+fut,cloudA.length);i++){[cloudA[i],cloudB[i]].forEach(v=>{if(v!=null){hi=Math.max(hi,v);lo=Math.min(lo,v);}});}
+  const pad=(hi-lo)*0.06||1; hi+=pad; lo-=pad;
+  const top=8, bot=MAIN_H-6;
+  const Y=v=>top+(hi-v)/(hi-lo)*(bot-top);
+
+  // ── 가격 그리드 + 축
+  ctx.font='10px "JetBrains Mono",monospace'; ctx.textBaseline='middle';
+  const step=niceStep((hi-lo)/5);
+  ctx.strokeStyle=GRID; ctx.lineWidth=1; ctx.fillStyle=MUTED;
+  for(let v=Math.ceil(lo/step)*step; v<=hi; v+=step){
+    const y=Math.round(Y(v))+.5;
+    ctx.globalAlpha=.6; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(plotW,y); ctx.stroke(); ctx.globalAlpha=1;
+    ctx.fillText(fmtAxis(v,step), plotW+6, y);
+  }
+
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,plotW,MAIN_H); ctx.clip();
+
+  // ── 일목 구름 (선행스팬 A/B 사이)
+  const cEnd=Math.min(L+fut,cloudA.length);
+  ctx.fillStyle='rgba(103,232,249,.28)';
+  for(let i=Math.max(start,1);i<cEnd;i++){
+    const a0=cloudA[i-1],b0=cloudB[i-1],a1=cloudA[i],b1=cloudB[i];
+    if([a0,b0,a1,b1].some(v=>v==null)) continue;
+    ctx.beginPath(); ctx.moveTo(X(i-1),Y(a0)); ctx.lineTo(X(i),Y(a1)); ctx.lineTo(X(i),Y(b1)); ctx.lineTo(X(i-1),Y(b0)); ctx.closePath(); ctx.fill();
+  }
+
+  // ── 이동평균선 (긴 것부터 그려서 짧은 선이 위로)
+  for(let k=MA_DEFS.length-1;k>=0;k--){
+    const [,color,w]=MA_DEFS[k], a=ma[k];
+    ctx.strokeStyle=color; ctx.lineWidth=w; ctx.beginPath(); let pen=false;
+    for(let i=start;i<L;i++){ if(a[i]==null){pen=false;continue;} const x=X(i),y=Y(a[i]); pen?ctx.lineTo(x,y):ctx.moveTo(x,y); pen=true; }
+    ctx.stroke();
+  }
+
+  // ── 캔들 (상승 빨강 / 하락 파랑)
+  const bw=Math.max(1,Math.min(9,xw*0.68));
+  for(let i=start;i<L;i++){
+    const o=d.opens[i],c=d.closes[i],h=d.highs[i],l=d.lows[i];
+    const up=c>=o, col=up?UP_C:DN_C, x=X(i);
+    ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(Math.round(x)+.5,Y(h)); ctx.lineTo(Math.round(x)+.5,Y(l)); ctx.stroke();
+    const y1=Y(Math.max(o,c)), y2=Y(Math.min(o,c));
+    ctx.fillRect(x-bw/2,y1,bw,Math.max(1,y2-y1));
+  }
+
+  // ── 기간 내 최고/최저 표시
+  let hiI=start,loI=start;
+  for(let i=start;i<L;i++){if(d.highs[i]>d.highs[hiI])hiI=i;if(d.lows[i]<d.lows[loI])loI=i;}
+  ctx.font='600 11px "Noto Sans KR",sans-serif';
+  markHL(ctx,X(hiI),Y(d.highs[hiI]),`최고 ${fmtPx(d.highs[hiI])} (${md(d.t[hiI])})`,UP_C,true,plotW);
+  markHL(ctx,X(loI),Y(d.lows[loI]),`최저 ${fmtPx(d.lows[loI])} (${md(d.t[loI])})`,DN_C,false,plotW);
+  ctx.restore();
+
+  // ── 현재가 라벨
+  const last=d.closes[L-1], ly=Y(last), lastUp=last>=(d.closes[L-2]??last);
+  ctx.fillStyle=lastUp?UP_C:DN_C; ctx.fillRect(plotW+1,ly-8,AXW-2,16);
+  ctx.fillStyle='#fff'; ctx.font='600 10px "JetBrains Mono",monospace'; ctx.fillText(fmtAxis(last,step/10),plotW+5,ly);
+
+  // ── 스토캐스틱 3단
+  STO_DEFS.forEach((sd,p)=>{
+    const y0=MAIN_H+LBL+p*(LBL+STO_H), y1=y0+STO_H;
+    const SY=v=>y0+(100-v)/100*STO_H;
+    const {k,d:dd}=sto[p];
+    ctx.strokeStyle=GRID; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(0,y0-LBL+.5); ctx.lineTo(W,y0-LBL+.5); ctx.stroke();
+    [80,20].forEach(v=>{const y=Math.round(SY(v))+.5;ctx.strokeStyle=MUTED;ctx.globalAlpha=.55;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(plotW,y);ctx.stroke();ctx.globalAlpha=1;ctx.fillStyle=MUTED;ctx.font='10px "JetBrains Mono",monospace';ctx.fillText(String(v),plotW+6,y);});
+    // 과매수(80↑) 주황 / 과매도(20↓) 하늘색 채우기
+    fillBand(ctx,k,start,L,X,SY,80,true,'rgba(244,162,97,.55)',y0,y1,plotW);
+    fillBand(ctx,k,start,L,X,SY,20,false,'rgba(96,165,250,.45)',y0,y1,plotW);
+    line(ctx,dd,start,L,X,SY,'#60a5fa',1.2);
+    line(ctx,k,start,L,X,SY,'#c2410c',1.2);
+    const hi_=CH.hover??L-1, kv=k[hi_], dv=dd[hi_];
+    ctx.font='600 11px "Noto Sans KR",sans-serif'; ctx.fillStyle=TEXT; ctx.textBaseline='middle';
+    const title=`${sd.name} 스토캐스틱 (${sd.n},${sd.m},${sd.t})`;
+    ctx.fillText(title,4,y0-LBL/2);
+    const tw=ctx.measureText(title).width;
+    ctx.font='10px "JetBrains Mono",monospace';
+    ctx.fillStyle='#c2410c'; ctx.fillText(`%K ${kv!=null?kv.toFixed(1):'—'}`,tw+14,y0-LBL/2);
+    ctx.fillStyle='#60a5fa'; ctx.fillText(`%D ${dv!=null?dv.toFixed(1):'—'}`,tw+74,y0-LBL/2);
+    const zone=kv==null?'':kv>=80?'과매수':kv<=20?'과매도':'';
+    if(zone){ctx.fillStyle=kv>=80?'#ea580c':'#2563eb';ctx.font='600 10px "Noto Sans KR",sans-serif';ctx.fillText(zone,tw+136,y0-LBL/2);}
+  });
+
+  // ── 날짜 축
+  const ay=H-AXIS/2; ctx.fillStyle=MUTED; ctx.font='10px "JetBrains Mono",monospace'; ctx.textAlign='center';
+  const span=L-start, monthsStep=span>900?6:span>400?3:span>200?2:1;
+  let lastX=-1e9;
+  for(let i=Math.max(start,1);i<L;i++){
+    const a=new Date(d.t[i-1]*1000), b=new Date(d.t[i]*1000);
+    if(a.getMonth()===b.getMonth()) continue;
+    if(b.getMonth()%monthsStep!==0) continue;
+    const x=X(i); if(x-lastX<48) continue; lastX=x;
+    const lbl=b.getMonth()===0?String(b.getFullYear()):`${b.getMonth()+1}월`;
+    ctx.fillText(lbl,x,ay);
+    ctx.strokeStyle=GRID; ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(Math.round(x)+.5,top); ctx.lineTo(Math.round(x)+.5,H-AXIS); ctx.stroke(); ctx.globalAlpha=1;
+  }
+  ctx.textAlign='left';
+
+  // ── 마우스 오버: 십자선 + 정보
+  const hv=CH.hover;
+  const info=hv??L-1;
+  const dt=new Date(d.t[info]*1000);
+  const ds=`${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')}`;
+  const chg=info>0?(d.closes[info]-d.closes[info-1])/d.closes[info-1]*100:0;
+  const parts=[[ds,TEXT],[`시 ${fmtPx(d.opens[info])}`,MUTED],[`고 ${fmtPx(d.highs[info])}`,UP_C],[`저 ${fmtPx(d.lows[info])}`,DN_C],[`종 ${fmtPx(d.closes[info])}`,TEXT],[`${chg>=0?'+':''}${chg.toFixed(2)}%`,chg>=0?UP_C:DN_C]];
+  ctx.font='600 11px "JetBrains Mono",monospace'; ctx.textBaseline='top';
+  let px=6; const py=6;
+  const totalW=parts.reduce((s,[t])=>s+ctx.measureText(t).width+10,0);
+  ctx.fillStyle=BG; ctx.globalAlpha=.85; ctx.fillRect(2,py-3,totalW+4,18); ctx.globalAlpha=1;
+  parts.forEach(([t,c])=>{ctx.fillStyle=c;ctx.fillText(t,px,py);px+=ctx.measureText(t).width+10;});
+  ctx.textBaseline='middle';
+  if(hv!=null){
+    const x=Math.round(X(hv))+.5;
+    ctx.strokeStyle=MUTED; ctx.setLineDash([3,3]); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x,top); ctx.lineTo(x,H-AXIS); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+function line(ctx,a,start,L,X,Y,color,w){
+  ctx.strokeStyle=color; ctx.lineWidth=w; ctx.beginPath(); let pen=false;
+  for(let i=start;i<L;i++){ if(a[i]==null){pen=false;continue;} pen?ctx.lineTo(X(i),Y(a[i])):ctx.moveTo(X(i),Y(a[i])); pen=true; }
+  ctx.stroke();
+}
+// 곡선과 기준선(80 또는 20) 사이를 기준선 바깥쪽만 채움
+function fillBand(ctx,a,start,L,X,Y,level,above,color,y0,y1,plotW){
+  const ly=Y(level);
+  ctx.save(); ctx.beginPath();
+  above?ctx.rect(0,y0,plotW,ly-y0):ctx.rect(0,ly,plotW,y1-ly); ctx.clip();
+  ctx.fillStyle=color; ctx.beginPath(); let first=null,lastI=null;
+  for(let i=start;i<L;i++){
+    if(a[i]==null) continue;
+    if(first==null){first=i;ctx.moveTo(X(i),ly);}
+    ctx.lineTo(X(i),Y(a[i])); lastI=i;
+  }
+  if(first!=null){ctx.lineTo(X(lastI),ly);ctx.closePath();ctx.fill();}
+  ctx.restore();
+}
+function markHL(ctx,x,y,text,color,isHigh,plotW){
+  ctx.fillStyle=color; ctx.strokeStyle=color; ctx.lineWidth=1;
+  const tw=ctx.measureText(text).width, right=x+tw+20<plotW;
+  const ty=isHigh?y-14:y+14;
+  ctx.beginPath(); ctx.moveTo(x,isHigh?y-3:y+3); ctx.lineTo(x,ty); ctx.lineTo(right?x+6:x-6,ty); ctx.stroke();
+  ctx.textBaseline='middle'; ctx.textAlign=right?'left':'right';
+  ctx.fillText(text,right?x+9:x-9,ty);
+  ctx.textAlign='left';
+}
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const f=raw/p;return (f<1.5?1:f<3?2:f<7?5:10)*p;}
+function fmtAxis(v,step){const dec=step>=1?0:Math.min(4,Math.ceil(-Math.log10(step)));return v.toLocaleString('ko-KR',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
+function fmtPx(v){if(v==null)return '—';const a=Math.abs(v);return v.toLocaleString('ko-KR',{maximumFractionDigits:a>=1000?0:a>=1?2:4});}
+function md(ts){const t=new Date(ts*1000);return `${String(t.getMonth()+1).padStart(2,'0')}/${String(t.getDate()).padStart(2,'0')}`;}
+let _rsT=null;
+window.addEventListener('resize',()=>{clearTimeout(_rsT);_rsT=setTimeout(drawStockChart,120);});
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',()=>drawStockChart());
 
 // ── 초기 실행 ────────────────────────────────
 loadDashboard();
