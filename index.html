@@ -219,18 +219,6 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:18px 0
 .score-num{font-family:var(--mono);font-size:22px;font-weight:600;min-width:44px;text-align:right}
 .score-ticks{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);font-family:var(--mono)}
 
-
-/* 종목 차트 (캔들 + 이평선 + 일목구름 + 스토캐스틱 3단) */
-.chart-panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px 12px;margin-bottom:20px}
-.chart-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.chart-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);font-family:var(--mono)}
-.chart-legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
-.chart-periods{display:flex;gap:4px}
-.chart-periods button{background:var(--faint);border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:700;padding:4px 10px;border-radius:7px;cursor:pointer;font-family:var(--sans)}
-.chart-periods button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.chart-wrap{position:relative;width:100%}
-#stk-canvas{display:block;width:100%;touch-action:pan-y}
-
 /* 면책 */
 .disclaimer{font-size:11px;color:var(--muted);background:var(--faint);border:1px solid var(--border);border-radius:9px;padding:10px 14px;line-height:1.6}
 
@@ -334,9 +322,6 @@ footer a{color:var(--accent2);text-decoration:none}
     <span class="chip" onclick="setTicker('NVDA')">NVDA</span>
     <span class="chip" onclick="setTicker('AMZN')">AMZN</span>
     <span class="chip" onclick="setTicker('MSFT')">MSFT</span>
-    <span class="chip" onclick="setTicker('ORCL')">ORCL</span>
-    <span class="chip" onclick="setTicker('GOOGL')">GOOGL</span>
-    <span class="chip" onclick="setTicker('META')">META</span>
     <span class="chip" onclick="setTicker('005930.KS')">삼성전자</span>
     <span class="chip" onclick="setTicker('000660.KS')">SK하이닉스</span>
     <span class="chip" onclick="setTicker('BTC-USD')">비트코인</span>
@@ -346,8 +331,8 @@ footer a{color:var(--accent2);text-decoration:none}
 </div>
 
 <footer style="margin-top:32px">
-  <span>데이터: Yahoo Finance · CNN Fear &amp; Greed · 각 언론사 RSS — GitHub Actions로 약 15분마다 갱신</span>
-  <span><a href="https://github.com/PgmJun/market-monitor" target="_blank">GitHub Pages</a>로 호스팅</span>
+  <span>데이터: Yahoo Finance · alternative.me · 각 언론사 RSS — 20분 지연 가능 · 자동 새로고침 5분</span>
+  <span><a href="https://github.com" target="_blank">GitHub Pages</a>로 호스팅</span>
 </footer>
 </div>
 
@@ -362,48 +347,79 @@ function switchTab(id, btn) {
 }
 
 // ── 데이터 설정 ──────────────────────────────
-// 1순위: GitHub Actions가 15분마다 저장하는 같은 사이트의 스냅샷 (CORS 문제 없음)
-// 2순위: 스냅샷에 없는 티커만 공개 CORS 프록시로 시도
-const PROXIES = [
-  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
-  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
-  u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
-];
+const AV_KEY = '7SVOMEV67J3D0LNI';
+const AV_BASE = 'https://www.alphavantage.co/query';
 
-async function fetchWithProxy(targetUrl) {
-  for (const make of PROXIES) {
-    try {
-      const r = await fetch(make(targetUrl), {signal: AbortSignal.timeout(8000)});
-      if (!r.ok) continue;
-      const text = await r.text();
-      if (text && text.length > 20) return text;
-    } catch { continue; }
-  }
-  return null;
+// Alpha Vantage 심볼 매핑 (야후 → AV)
+const SYM_MAP = {
+  '^GSPC':'SPY', '^IXIC':'QQQ', '^DJI':'DIA',
+  '^KS11':'EWY', '^KQ11':'EWY', '^N225':'EWJ',
+  '^VIX':'VIX',
+  'CL=F':'USO',  'BZ=F':'BNO',  'GC=F':'GLD',
+  'SI=F':'SLV',  'HG=F':'CPER', 'NG=F':'UNG',
+  '^IRX':'SHY',  '^TNX':'IEF',  '^TYX':'TLT',
+  'KRW=X':'FXY', 'EURUSD=X':'FXE','JPY=X':'FXY',
+  'GBPUSD=X':'FXB','CNY=X':'CYB',
+  'BTC-USD':'BITO','ETH-USD':'ETHU','SOL-USD':'SOLI','XRP-USD':'XRPUSD',
+};
+
+// 대시보드용 — GLOBAL_QUOTE (현재가 + 전일가)
+const avCache={};
+async function fetchAV(sym, full=false) {
+  const avSym = SYM_MAP[sym] || sym.replace(/\^|=F|=X|-USD$/g,'');
+  const func = full ? 'TIME_SERIES_DAILY' : 'GLOBAL_QUOTE';
+  const key = avSym+func;
+  if(avCache[key]&&Date.now()-avCache[key].ts<120000) return avCache[key].d;
+  try {
+    const params = new URLSearchParams({function:func, symbol:avSym, apikey:AV_KEY, ...(full?{outputsize:'compact'}:{})});
+    const r = await fetch(`${AV_BASE}?${params}`, {signal:AbortSignal.timeout(10000)});
+    const j = await r.json();
+    avCache[key]={ts:Date.now(),d:j};
+    return j;
+  } catch { return null; }
 }
 
-let SNAP=null, HIST=null;
-async function loadSnapshot(force=false){
-  if(SNAP && !force) return SNAP;
-  try{
-    const r=await fetch('data/market.json?t='+Date.now());
-    if(r.ok) SNAP=await r.json();
-  }catch{}
-  return SNAP;
+// 대시보드 카드용 — price/change 반환
+async function fetchQuote(sym) {
+  const j = await fetchAV(sym, false);
+  if(!j) return null;
+  const q = j['Global Quote'];
+  if(!q||!q['05. price']) return null;
+  const price = parseFloat(q['05. price']);
+  const prev  = parseFloat(q['08. previous close']);
+  const pct   = prev ? (price-prev)/prev*100 : 0;
+  return {price, prev, pct, name:SYM_MAP[sym]||sym};
 }
-async function loadHistory(){
-  if(HIST) return HIST;
-  try{
-    const r=await fetch('data/history.json?t='+Math.floor(Date.now()/600000));
-    if(r.ok) HIST=await r.json();
-  }catch{}
-  return HIST;
-}
-const RANGE_BARS={'2d':5,'5d':5,'3mo':63,'6mo':126,'1y':252,'5y':99999};
-function sliceSeries(d,range){
-  const n=RANGE_BARS[range]||99999;
-  const tail=a=>(a||[]).slice(-n);
-  return {t:tail(d.t),opens:tail(d.opens),closes:tail(d.closes),highs:tail(d.highs),lows:tail(d.lows),vols:tail(d.vols),meta:d.meta};
+
+// 종목 분석용 — closes 배열 반환 (TIME_SERIES_DAILY)
+const cache={};
+async function fetchQ(sym, range='2d'){
+  const key=sym+range;
+  if(cache[key]&&Date.now()-cache[key].ts<120000) return cache[key].d;
+  try {
+    // range → 필요한 봉 수
+    const needBars = range==='3mo'?90:range==='1y'?260:range==='5y'?1260:5;
+    const avSym = SYM_MAP[sym] || sym.replace(/[^A-Z0-9.]/gi,'');
+    const outputsize = needBars>100 ? 'full' : 'compact';
+    const params = new URLSearchParams({function:'TIME_SERIES_DAILY',symbol:avSym,outputsize,apikey:AV_KEY});
+    const r = await fetch(`${AV_BASE}?${params}`, {signal:AbortSignal.timeout(12000)});
+    const j = await r.json();
+    if(j.Note||j.Information) return null; // rate limit
+    const ts = j['Time Series (Daily)'];
+    if(!ts) return null;
+    const days = Object.keys(ts).sort();
+    const closes = days.map(d=>parseFloat(ts[d]['4. close'])).filter(Boolean);
+    const highs   = days.map(d=>parseFloat(ts[d]['2. high'])).filter(Boolean);
+    const lows    = days.map(d=>parseFloat(ts[d]['3. low'])).filter(Boolean);
+    const vols    = days.map(d=>parseFloat(ts[d]['5. volume'])).filter(Boolean);
+    const slice   = n => arr => arr.slice(-Math.min(n,arr.length));
+    const s = slice(needBars);
+    const price = closes[closes.length-1];
+    const meta  = {regularMarketPrice:price, longName:avSym, currency:'USD'};
+    const d = {closes:s(closes),highs:s(highs),lows:s(lows),vols:s(vols),meta};
+    cache[key]={ts:Date.now(),d};
+    return d;
+  } catch { return null; }
 }
 
 const INDICES = [
@@ -415,62 +431,26 @@ const INDICES = [
   {name:'닛케이',  sym:'^N225', accent:'#f87171'},
 ];
 const COMMODITIES=[
-  {name:'WTI 원유',    sym:'CL=F', unit:'USD/bbl'},
-  {name:'브렌트 원유', sym:'BZ=F', unit:'USD/bbl'},
+  {name:'WTI 원유',    sym:'CL=F', unit:'USD'},
   {name:'금',          sym:'GC=F', unit:'USD/oz'},
   {name:'은',          sym:'SI=F', unit:'USD/oz'},
   {name:'구리',        sym:'HG=F', unit:'USD/lb'},
-  {name:'천연가스',    sym:'NG=F', unit:'MMBtu'},
+  {name:'천연가스',    sym:'NG=F', unit:''},
 ];
 const BONDS=[
-  {name:'미국 13주 국채', sym:'^IRX', unit:'%'},
-  {name:'미국 10년 국채', sym:'^TNX', unit:'%'},
-  {name:'미국 30년 국채', sym:'^TYX', unit:'%'},
+  {name:'미국 2년 국채 ETF',  sym:'^IRX', unit:''},
+  {name:'미국 10년 국채 ETF', sym:'^TNX', unit:''},
+  {name:'미국 30년 국채 ETF', sym:'^TYX', unit:''},
 ];
 const FOREX=[
-  {name:'USD/KRW', sym:'KRW=X',    unit:'₩'},
-  {name:'EUR/USD', sym:'EURUSD=X', unit:''},
-  {name:'USD/JPY', sym:'JPY=X',    unit:'¥'},
-  {name:'GBP/USD', sym:'GBPUSD=X', unit:''},
-  {name:'USD/CNY', sym:'CNY=X',    unit:'¥'},
+  {name:'엔화 ETF',   sym:'JPY=X',    unit:''},
+  {name:'유로 ETF',   sym:'EURUSD=X', unit:''},
+  {name:'파운드 ETF', sym:'GBPUSD=X', unit:''},
 ];
 const CRYPTO=[
-  {name:'Bitcoin',  sym:'BTC-USD', unit:'USD'},
-  {name:'Ethereum', sym:'ETH-USD', unit:'USD'},
-  {name:'Solana',   sym:'SOL-USD', unit:'USD'},
-  {name:'XRP',      sym:'XRP-USD', unit:'USD'},
+  {name:'Bitcoin ETF', sym:'BTC-USD', unit:'USD'},
+  {name:'Ethereum ETF',sym:'ETH-USD', unit:'USD'},
 ];
-
-// ── fetch 헬퍼 ───────────────────────────────
-const cache={};
-async function fetchQ(sym,range='2d'){
-  const key=sym+range;
-  if(cache[key]&&Date.now()-cache[key].ts<60000) return cache[key].d;
-  // 스냅샷 우선
-  const isShort=(range==='2d'||range==='5d');
-  if(isShort){
-    const s=await loadSnapshot();
-    if(s?.quotes?.[sym]) return sliceSeries(s.quotes[sym],range);
-  }
-  const h=await loadHistory();
-  if(h?.symbols?.[sym]) return sliceSeries(h.symbols[sym],range);
-  try{
-    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=${range}`;
-    const text=await fetchWithProxy(url);
-    if(!text) return null;
-    const j=JSON.parse(text);
-    const res=j.chart.result[0];
-    const q=res.indicators.quote[0], T=res.timestamp||[];
-    const t=[],opens=[],highs=[],lows=[],closes=[],vols=[];
-    (q.close||[]).forEach((c,i)=>{
-      if(c==null) return;
-      t.push(T[i]??null); closes.push(c);
-      opens.push(q.open?.[i]??c); highs.push(q.high?.[i]??c); lows.push(q.low?.[i]??c); vols.push(q.volume?.[i]||0);
-    });
-    cache[key]={ts:Date.now(),d:{t,opens,closes,highs,lows,vols,meta:res.meta}};
-    return cache[key].d;
-  }catch{return null;}
-}
 
 function fmt(v,unit=''){
   if(v==null||isNaN(v)) return '—';
@@ -491,15 +471,13 @@ function chgInfo(pct){
 async function renderHero(){
   const g=document.getElementById('hero-grid');
   g.innerHTML=INDICES.map(()=>`<div class="hero-card" style="min-height:110px"><div class="sk" style="height:10px;width:50px;margin-bottom:10px"></div><div class="sk" style="height:24px;width:100px;margin-bottom:8px"></div><div class="sk" style="height:12px;width:70px"></div></div>`).join('');
-  const rs=await Promise.all(INDICES.map(i=>fetchQ(i.sym)));
+  const rs=await Promise.all(INDICES.map(i=>fetchQuote(i.sym)));
   g.innerHTML=INDICES.map((idx,i)=>{
-    const d=rs[i]; const c=d?.closes; const last=c?c[c.length-1]:null;
-    const prev=c&&c.length>1?c[c.length-2]:null;
-    const pct=last&&prev?(last-prev)/prev*100:null;
-    const {t,c:cls}=chgInfo(pct);
+    const d=rs[i];
+    const {t,c:cls}=chgInfo(d?.pct??null);
     return `<div class="hero-card" style="--card-accent:${idx.accent}">
       <div class="hc-name">${idx.name}</div>
-      <div class="hc-price">${fmt(last)}</div>
+      <div class="hc-price">${fmt(d?.price)}</div>
       <div class="hc-chg ${cls}">${t}</div>
     </div>`;
   }).join('');
@@ -508,11 +486,10 @@ async function renderHero(){
 // ── VIX 상세 패널 ────────────────────────────
 async function renderVIX(){
   const el=document.getElementById('vix-detail');
-  const d=await fetchQ('^VIX');
-  const closes=d?.closes||[];
-  const val=closes[closes.length-1];
-  const prev=closes[closes.length-2]||val;
-  const pct=val&&prev?(val-prev)/prev*100:0;
+  const d=await fetchQuote('^VIX');
+  const val=d?.price;
+  const prev=d?.prev||val;
+  const pct=d?.pct||0;
   if(!val){el.innerHTML=`<div style="padding:16px;color:var(--muted)">VIX 데이터를 불러올 수 없습니다.</div>`;return;}
 
   let level,lcolor,meanings;
@@ -573,23 +550,16 @@ async function renderVIX(){
 async function renderFNG(){
   const el=document.getElementById('fng-panel');
   try{
-    let items=null, source='';
-    const s=await loadSnapshot();
-    if(s?.fng?.items?.length){ items=s.fng.items; source=s.fng.source; }
-    else{
-      const text=await fetchWithProxy('https://api.alternative.me/fng/?limit=8');
-      if(!text) throw new Error('no data');
-      items=JSON.parse(text).data.map(d=>({value:+d.value,label:d.value_classification,ts:+d.timestamp}));
-      source='alternative.me (암호화폐)';
-    }
-    const curr=items[0];
-    const val=Math.round(+curr.value);
-    const lblKo={'extreme fear':'극단적 공포','fear':'공포','neutral':'중립','greed':'탐욕','extreme greed':'극단적 탐욕'}[String(curr.label).toLowerCase()]||curr.label;
+    const r=await fetch('https://api.alternative.me/fng/?limit=8',{signal:AbortSignal.timeout(8000)});
+    const j=await r.json();
+    const items=j.data; const curr=items[0];
+    const val=parseInt(curr.value);
+    const lblKo={'Extreme Fear':'극단적 공포','Fear':'공포','Neutral':'중립','Greed':'탐욕','Extreme Greed':'극단적 탐욕'}[curr.value_classification]||curr.value_classification;
     const color=val<=25?'var(--dn)':val<=45?'var(--warn)':val<=55?'var(--flat)':val<=75?'var(--up)':'var(--accent)';
     const hist=items.slice(1,7).map(it=>{
-      const v=Math.round(+it.value);
+      const v=parseInt(it.value);
       const c=v<=25?'var(--dn)':v<=45?'var(--warn)':v<=55?'var(--flat)':v<=75?'var(--up)':'var(--accent)';
-      const d=new Date(it.ts*1000);
+      const d=new Date(it.timestamp*1000);
       return `<div class="fng-hi"><div class="fng-hi-v" style="color:${c}">${v}</div><div class="fng-hi-d">${(d.getMonth()+1)}/${d.getDate()}</div></div>`;
     }).join('');
     el.innerHTML=`<div class="fng-row">
@@ -598,7 +568,7 @@ async function renderFNG(){
         <div class="fng-bar-track"><div class="fng-pointer" style="left:${val}%"></div></div>
         <div class="fng-scale"><span>극공포(0)</span><span>공포(25)</span><span>중립(50)</span><span>탐욕(75)</span><span>극탐욕(100)</span></div>
       </div>
-      <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--mono)">최근 히스토리 · 출처 ${source}</div><div class="fng-hist">${hist}</div></div>
+      <div><div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-family:var(--mono)">7일 히스토리</div><div class="fng-hist">${hist}</div></div>
     </div>`;
   }catch{el.innerHTML=`<div style="padding:16px;color:var(--muted);font-size:13px">공포·탐욕 지수를 불러올 수 없습니다.</div>`;}
 }
@@ -607,15 +577,13 @@ async function renderFNG(){
 const PANEL_ICONS={'commodities-panel':'🛢️','bonds-panel':'📊','forex-panel':'💱','crypto-panel':'₿'};
 async function renderTable(pid,items){
   const el=document.getElementById(pid);
-  const rs=await Promise.all(items.map(i=>fetchQ(i.sym)));
+  const rs=await Promise.all(items.map(i=>fetchQuote(i.sym)));
   const rows=items.map((item,i)=>{
-    const c=rs[i]?.closes; const last=c?c[c.length-1]:null;
-    const prev=c&&c.length>1?c[c.length-2]:null;
-    const pct=last&&prev?(last-prev)/prev*100:null;
-    const {t,c:cls}=chgInfo(pct);
+    const d=rs[i];
+    const {t,c:cls}=chgInfo(d?.pct??null);
     return `<div class="dr">
       <div><div class="dr-name">${item.name}</div><div class="dr-sub">${item.unit||''}</div></div>
-      <div class="dr-price">${fmt(last,item.unit)}</div>
+      <div class="dr-price">${fmt(d?.price)}</div>
       <div class="dr-chg ${cls}">${t}</div>
     </div>`;
   }).join('');
@@ -623,21 +591,14 @@ async function renderTable(pid,items){
 }
 
 // ── 뉴스 ─────────────────────────────────────
-const escHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function renderNews(pid,region,feeds){
+const RSS_PROXY = 'https://api.allorigins.win/get?url=';
+async function renderNews(pid,feeds){
   const el=document.getElementById(pid);
-  const s=await loadSnapshot();
-  const snapItems=s?.news?.[region];
-  if(snapItems?.length){
-    el.innerHTML=snapItems.map(n=>{
-      const rel=n.pubDate?relTime(new Date(n.pubDate)):'';
-      return `<a class="ni" href="${escHtml(n.link)}" target="_blank" rel="noopener" style="display:block;color:inherit;text-decoration:none"><div class="ni-title">${escHtml(n.title)}</div><div class="ni-meta"><span class="ni-src">${escHtml(n.source)}</span><span>${rel}</span></div></a>`;
-    }).join('');
-    return;
-  }
   for(const url of feeds){
     try{
-      const text=await fetchWithProxy(url);
+      const r=await fetch(RSS_PROXY+encodeURIComponent(url),{signal:AbortSignal.timeout(8000)});
+      const o=await r.json();
+      const text=o.contents;
       if(!text) continue;
       const xml=new DOMParser().parseFromString(text,'text/xml');
       const items=Array.from(xml.querySelectorAll('item')).slice(0,6);
@@ -663,12 +624,10 @@ function relTime(d){
 
 // ── 대시보드 전체 로드 ───────────────────────
 function updateTs(){
-  const n=SNAP?.updated?new Date(SNAP.updated):new Date();
-  document.getElementById('updated-text').innerHTML=`<span class="live-dot"></span>${n.toLocaleString('ko-KR',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} 데이터 기준`;
+  const n=new Date();
+  document.getElementById('updated-text').innerHTML=`<span class="live-dot"></span>${n.toLocaleString('ko-KR',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} 업데이트`;
 }
 async function loadDashboard(){
-  Object.keys(cache).forEach(k=>delete cache[k]);
-  await loadSnapshot(true);
   updateTs();
   await Promise.allSettled([
     renderHero(),
@@ -678,8 +637,8 @@ async function loadDashboard(){
     renderTable('bonds-panel',BONDS),
     renderTable('forex-panel',FOREX),
     renderTable('crypto-panel',CRYPTO),
-    renderNews('us-news-panel','us',['https://finance.yahoo.com/news/rssindex']),
-    renderNews('kr-news-panel','kr',['https://www.hankyung.com/feed/economy','https://www.yna.co.kr/rss/economy.xml','https://www.mk.co.kr/rss/30100041/']),
+    renderNews('us-news-panel',['https://finance.yahoo.com/news/rssindex','https://feeds.reuters.com/reuters/businessNews']),
+    renderNews('kr-news-panel',['https://www.hankyung.com/feed/economy','https://www.yna.co.kr/rss/economy.xml','https://www.mk.co.kr/rss/30100041/']),
   ]);
 }
 
@@ -1019,13 +978,13 @@ async function runAnalysis(){
   ]);
 
   if(!d3m?.closes?.length){
-    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>빠른선택 종목은 서버에 미리 저장된 데이터를 쓰고, 그 외 티커는 공개 프록시로 받아와서 가끔 실패할 수 있어요. 잠시 후 다시 시도하거나 Yahoo Finance 심볼을 확인해주세요. (예: 삼성전자 → 005930.KS, 비트코인 → BTC-USD)</div></div>`;
+    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>Yahoo Finance 심볼을 확인해주세요. (예: 삼성전자 → 005930.KS, 비트코인 → BTC-USD)</div></div>`;
     return;
   }
 
-  const meta = d3m.meta;
-  const name = meta?.longName||meta?.shortName||raw;
-  const currency = meta?.currency||'USD';
+  // Alpha Vantage에서 회사명은 OVERVIEW API로 가져오지만 rate limit 절약을 위해 심볼 사용
+  const currency = raw.endsWith('.KS')||raw.endsWith('.KQ') ? 'KRW' : 'USD';
+  const name = raw;
   const price = d3m.closes[d3m.closes.length-1];
   const prev  = d3m.closes[d3m.closes.length-2]||price;
   const pct   = (price-prev)/prev*100;
@@ -1118,16 +1077,6 @@ async function runAnalysis(){
       </div>
     </div>
 
-    <div class="chart-panel">
-      <div class="chart-top">
-        <div class="chart-legend" id="chart-legend"></div>
-        <div class="chart-periods" id="chart-periods">
-          <button data-p="6m">6개월</button><button data-p="1y" class="on">1년</button><button data-p="2y">2년</button><button data-p="5y">5년</button>
-        </div>
-      </div>
-      <div class="chart-wrap"><canvas id="stk-canvas"></canvas></div>
-    </div>
-
     <div class="eval-banner ${evalType}">
       <div class="eb-top">
         <div class="eb-icon">${evalIcon}</div>
@@ -1182,265 +1131,7 @@ async function runAnalysis(){
       </div>
       <div class="score-ticks"><span>매도 (0)</span><span>하락우세 (25)</span><span>중립 (50)</span><span>상승우세 (75)</span><span>매수 (100)</span></div>
     </div>`;
-  const chartData=[d5y,d1y,d3m].find(x=>x?.t?.length&&x.opens?.length)||null;
-  initStockChart(chartData);
 }
-
-// ══════════════════════════════════════════════
-// 종목 차트: 캔들 + 이동평균선 + 일목 구름대 + 스토캐스틱(단기/중기/장기)
-// ══════════════════════════════════════════════
-const MA_DEFS=[[5,'#d946ef',1.2],[10,'#3b4cca',1.2],[20,'#f0a430',1.8],[60,'#2e9e4f',1.8],[120,'#8b4513',1.8],[240,'#b8a2e3',1.8],[480,'#e03131',2.4]];
-const STO_DEFS=[{name:'단기',n:5,m:3,t:3},{name:'중기',n:10,m:6,t:6},{name:'장기',n:20,m:12,t:12}];
-const UP_C='#e5383b', DN_C='#2563eb', CLOUD_SHIFT=26;
-const PERIOD_BARS={'6m':126,'1y':252,'2y':504,'5y':1e9};
-let CH=null; // {d, ma, cloudA, cloudB, sto, period, hover}
-
-// 연속된 n개 값이 모두 있을 때만 평균 (앞부분 null 허용)
-function smaN(a,n){
-  const out=new Array(a.length).fill(null); let s=0,k=0;
-  for(let i=0;i<a.length;i++){
-    if(a[i]==null){s=0;k=0;continue;}
-    s+=a[i];k++;
-    if(k>n){s-=a[i-n];k=n;}
-    if(k===n) out[i]=s/n;
-  }
-  return out;
-}
-function rollHL(h,l,i,n){
-  if(i<n-1) return null;
-  let hh=-Infinity,ll=Infinity;
-  for(let j=i-n+1;j<=i;j++){if(h[j]>hh)hh=h[j];if(l[j]<ll)ll=l[j];}
-  return [hh,ll];
-}
-function slowStoch(d,n,m,t){
-  const fast=d.closes.map((c,i)=>{const r=rollHL(d.highs,d.lows,i,n);if(!r)return null;return r[0]===r[1]?50:(c-r[1])/(r[0]-r[1])*100;});
-  const k=smaN(fast,m); return {k, d:smaN(k,t)};
-}
-function computeChart(d){
-  const L=d.closes.length;
-  const ma=MA_DEFS.map(([n])=>smaN(d.closes,n));
-  const cloudA=new Array(L+CLOUD_SHIFT).fill(null), cloudB=new Array(L+CLOUD_SHIFT).fill(null);
-  for(let i=0;i<L;i++){
-    const t9=rollHL(d.highs,d.lows,i,9), k26=rollHL(d.highs,d.lows,i,26), s52=rollHL(d.highs,d.lows,i,52);
-    if(t9&&k26) cloudA[i+CLOUD_SHIFT]=((t9[0]+t9[1])/2+(k26[0]+k26[1])/2)/2;
-    if(s52) cloudB[i+CLOUD_SHIFT]=(s52[0]+s52[1])/2;
-  }
-  const sto=STO_DEFS.map(s=>slowStoch(d,s.n,s.m,s.t));
-  return {ma,cloudA,cloudB,sto};
-}
-
-function initStockChart(d){
-  const panel=document.querySelector('.chart-panel');
-  if(!panel) return;
-  if(!d||d.closes.length<30){panel.innerHTML='<div style="padding:20px;color:var(--muted);font-size:13px">차트를 그릴 데이터가 부족합니다.</div>';return;}
-  const L=d.closes.length;
-  CH={d,...computeChart(d),period:L>=400?'1y':'5y',hover:null};
-  document.getElementById('chart-legend').innerHTML=
-    MA_DEFS.filter(([n])=>n<L).map(([n,c])=>`<span><i style="background:${c}"></i>${n}일</span>`).join('')+
-    `<span><i style="background:rgba(103,232,249,.55);height:8px"></i>일목 구름</span>`;
-  const btns=document.querySelectorAll('#chart-periods button');
-  btns.forEach(b=>{
-    b.classList.toggle('on',b.dataset.p===CH.period);
-    b.onclick=()=>{CH.period=b.dataset.p;CH.hover=null;btns.forEach(x=>x.classList.toggle('on',x===b));drawStockChart();};
-  });
-  const cv=document.getElementById('stk-canvas');
-  const onMove=e=>{
-    if(!CH?.geo) return;
-    const r=cv.getBoundingClientRect(), x=e.clientX-r.left, g=CH.geo;
-    const i=g.start+Math.floor(x/g.xw);
-    CH.hover=(x>=0&&x<g.plotW&&i>=g.start&&i<g.L)?i:null;
-    if(!CH.raf) CH.raf=requestAnimationFrame(()=>{CH.raf=null;drawStockChart();});
-  };
-  cv.onpointermove=onMove; cv.onpointerdown=onMove;
-  cv.onpointerleave=()=>{CH.hover=null;drawStockChart();};
-  drawStockChart();
-}
-
-function drawStockChart(){
-  if(!CH) return;
-  const cv=document.getElementById('stk-canvas'); if(!cv) return;
-  const {d,ma,cloudA,cloudB,sto}=CH;
-  const css=getComputedStyle(document.documentElement);
-  const V=n=>css.getPropertyValue(n).trim();
-  const TEXT=V('--text'), MUTED=V('--muted'), GRID=V('--border'), BG=V('--surface');
-  const W=cv.parentElement.clientWidth;
-  if(W<50) return;
-  const MAIN_H=Math.round(Math.max(260,Math.min(420,W*0.48))), STO_H=78, LBL=22, AXIS=22;
-  const H=MAIN_H+STO_DEFS.length*(LBL+STO_H)+AXIS;
-  const dpr=window.devicePixelRatio||1;
-  cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
-  const ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.fillStyle=BG; ctx.fillRect(0,0,W,H);
-
-  const L=d.closes.length, start=Math.max(0,L-PERIOD_BARS[CH.period]);
-  const fut=Math.round((L-start)*0.04)+4; // 구름대가 살짝 앞으로 보이도록 여백
-  const AXW=62, plotW=W-AXW, slots=(L-start)+fut, xw=plotW/slots;
-  CH.geo={start,L,xw,plotW};
-  const X=i=>(i-start+0.5)*xw;
-
-  // ── 가격 범위
-  let hi=-Infinity, lo=Infinity;
-  for(let i=start;i<L;i++){hi=Math.max(hi,d.highs[i]);lo=Math.min(lo,d.lows[i]);}
-  ma.forEach(a=>{for(let i=start;i<L;i++) if(a[i]!=null){hi=Math.max(hi,a[i]);lo=Math.min(lo,a[i]);}});
-  for(let i=start;i<Math.min(L+fut,cloudA.length);i++){[cloudA[i],cloudB[i]].forEach(v=>{if(v!=null){hi=Math.max(hi,v);lo=Math.min(lo,v);}});}
-  const pad=(hi-lo)*0.06||1; hi+=pad; lo-=pad;
-  const top=30, bot=MAIN_H-8;
-  const Y=v=>top+(hi-v)/(hi-lo)*(bot-top);
-
-  // ── 가격 그리드 + 축
-  ctx.font='10px "JetBrains Mono",monospace'; ctx.textBaseline='middle';
-  const step=niceStep((hi-lo)/5);
-  ctx.strokeStyle=GRID; ctx.lineWidth=1; ctx.fillStyle=MUTED;
-  for(let v=Math.ceil(lo/step)*step; v<=hi; v+=step){
-    const y=Math.round(Y(v))+.5;
-    ctx.globalAlpha=.6; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(plotW,y); ctx.stroke(); ctx.globalAlpha=1;
-    ctx.fillText(fmtAxis(v,step), plotW+6, y);
-  }
-
-  ctx.save(); ctx.beginPath(); ctx.rect(0,0,plotW,MAIN_H); ctx.clip();
-
-  // ── 일목 구름 (선행스팬 A/B 사이)
-  const cEnd=Math.min(L+fut,cloudA.length);
-  ctx.fillStyle='rgba(103,232,249,.28)';
-  for(let i=Math.max(start,1);i<cEnd;i++){
-    const a0=cloudA[i-1],b0=cloudB[i-1],a1=cloudA[i],b1=cloudB[i];
-    if([a0,b0,a1,b1].some(v=>v==null)) continue;
-    ctx.beginPath(); ctx.moveTo(X(i-1),Y(a0)); ctx.lineTo(X(i),Y(a1)); ctx.lineTo(X(i),Y(b1)); ctx.lineTo(X(i-1),Y(b0)); ctx.closePath(); ctx.fill();
-  }
-
-  // ── 이동평균선 (긴 것부터 그려서 짧은 선이 위로)
-  for(let k=MA_DEFS.length-1;k>=0;k--){
-    const [,color,w]=MA_DEFS[k], a=ma[k];
-    ctx.strokeStyle=color; ctx.lineWidth=w; ctx.beginPath(); let pen=false;
-    for(let i=start;i<L;i++){ if(a[i]==null){pen=false;continue;} const x=X(i),y=Y(a[i]); pen?ctx.lineTo(x,y):ctx.moveTo(x,y); pen=true; }
-    ctx.stroke();
-  }
-
-  // ── 캔들 (상승 빨강 / 하락 파랑)
-  const bw=Math.max(1,Math.min(9,xw*0.68));
-  for(let i=start;i<L;i++){
-    const o=d.opens[i],c=d.closes[i],h=d.highs[i],l=d.lows[i];
-    const up=c>=o, col=up?UP_C:DN_C, x=X(i);
-    ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(Math.round(x)+.5,Y(h)); ctx.lineTo(Math.round(x)+.5,Y(l)); ctx.stroke();
-    const y1=Y(Math.max(o,c)), y2=Y(Math.min(o,c));
-    ctx.fillRect(x-bw/2,y1,bw,Math.max(1,y2-y1));
-  }
-
-  // ── 기간 내 최고/최저 표시
-  let hiI=start,loI=start;
-  for(let i=start;i<L;i++){if(d.highs[i]>d.highs[hiI])hiI=i;if(d.lows[i]<d.lows[loI])loI=i;}
-  ctx.font='600 11px "Noto Sans KR",sans-serif';
-  markHL(ctx,X(hiI),Y(d.highs[hiI]),`최고 ${fmtPx(d.highs[hiI])} (${md(d.t[hiI])})`,UP_C,true,plotW);
-  markHL(ctx,X(loI),Y(d.lows[loI]),`최저 ${fmtPx(d.lows[loI])} (${md(d.t[loI])})`,DN_C,false,plotW);
-  ctx.restore();
-
-  // ── 현재가 라벨
-  const last=d.closes[L-1], ly=Y(last), lastUp=last>=(d.closes[L-2]??last);
-  ctx.fillStyle=lastUp?UP_C:DN_C; ctx.fillRect(plotW+1,ly-8,AXW-2,16);
-  ctx.fillStyle='#fff'; ctx.font='600 10px "JetBrains Mono",monospace'; ctx.fillText(fmtAxis(last,step/10),plotW+5,ly);
-
-  // ── 스토캐스틱 3단
-  STO_DEFS.forEach((sd,p)=>{
-    const y0=MAIN_H+LBL+p*(LBL+STO_H), y1=y0+STO_H;
-    const SY=v=>y0+(100-v)/100*STO_H;
-    const {k,d:dd}=sto[p];
-    ctx.strokeStyle=GRID; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(0,y0-LBL+.5); ctx.lineTo(W,y0-LBL+.5); ctx.stroke();
-    [80,20].forEach(v=>{const y=Math.round(SY(v))+.5;ctx.strokeStyle=MUTED;ctx.globalAlpha=.55;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(plotW,y);ctx.stroke();ctx.globalAlpha=1;ctx.fillStyle=MUTED;ctx.font='10px "JetBrains Mono",monospace';ctx.fillText(String(v),plotW+6,y);});
-    // 과매수(80↑) 주황 / 과매도(20↓) 하늘색 채우기
-    fillBand(ctx,k,start,L,X,SY,80,true,'rgba(244,162,97,.55)',y0,y1,plotW);
-    fillBand(ctx,k,start,L,X,SY,20,false,'rgba(96,165,250,.45)',y0,y1,plotW);
-    line(ctx,dd,start,L,X,SY,'#60a5fa',1.2);
-    line(ctx,k,start,L,X,SY,'#c2410c',1.2);
-    const hi_=CH.hover??L-1, kv=k[hi_], dv=dd[hi_];
-    ctx.font='600 11px "Noto Sans KR",sans-serif'; ctx.fillStyle=TEXT; ctx.textBaseline='middle';
-    const title=`${sd.name} 스토캐스틱 (${sd.n},${sd.m},${sd.t})`;
-    ctx.fillText(title,4,y0-LBL/2);
-    const tw=ctx.measureText(title).width;
-    ctx.font='10px "JetBrains Mono",monospace';
-    ctx.fillStyle='#c2410c'; ctx.fillText(`%K ${kv!=null?kv.toFixed(1):'—'}`,tw+14,y0-LBL/2);
-    ctx.fillStyle='#60a5fa'; ctx.fillText(`%D ${dv!=null?dv.toFixed(1):'—'}`,tw+74,y0-LBL/2);
-    const zone=kv==null?'':kv>=80?'과매수':kv<=20?'과매도':'';
-    if(zone){ctx.fillStyle=kv>=80?'#ea580c':'#2563eb';ctx.font='600 10px "Noto Sans KR",sans-serif';ctx.fillText(zone,tw+136,y0-LBL/2);}
-  });
-
-  // ── 날짜 축
-  const ay=H-AXIS/2; ctx.fillStyle=MUTED; ctx.font='10px "JetBrains Mono",monospace'; ctx.textAlign='center';
-  const span=L-start, monthsStep=span>900?6:span>400?3:span>200?2:1;
-  let lastX=-1e9;
-  for(let i=Math.max(start,1);i<L;i++){
-    const a=new Date(d.t[i-1]*1000), b=new Date(d.t[i]*1000);
-    if(a.getMonth()===b.getMonth()) continue;
-    if(b.getMonth()%monthsStep!==0) continue;
-    const x=X(i); if(x-lastX<48) continue; lastX=x;
-    const lbl=b.getMonth()===0?String(b.getFullYear()):`${b.getMonth()+1}월`;
-    ctx.fillText(lbl,x,ay);
-    ctx.strokeStyle=GRID; ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(Math.round(x)+.5,top); ctx.lineTo(Math.round(x)+.5,H-AXIS); ctx.stroke(); ctx.globalAlpha=1;
-  }
-  ctx.textAlign='left';
-
-  // ── 마우스 오버: 십자선 + 정보
-  const hv=CH.hover;
-  const info=hv??L-1;
-  const dt=new Date(d.t[info]*1000);
-  const ds=`${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')}`;
-  const chg=info>0?(d.closes[info]-d.closes[info-1])/d.closes[info-1]*100:0;
-  const parts=[[ds,TEXT],[`시 ${fmtPx(d.opens[info])}`,MUTED],[`고 ${fmtPx(d.highs[info])}`,UP_C],[`저 ${fmtPx(d.lows[info])}`,DN_C],[`종 ${fmtPx(d.closes[info])}`,TEXT],[`${chg>=0?'+':''}${chg.toFixed(2)}%`,chg>=0?UP_C:DN_C]];
-  ctx.font='600 11px "JetBrains Mono",monospace'; ctx.textBaseline='top';
-  let px=6; const py=6;
-  const widthOf=ps=>ps.reduce((s,[t])=>s+ctx.measureText(t).width+10,0);
-  if(widthOf(parts)>plotW-8) parts.splice(1,3); // 좁은 화면: 날짜·종가·등락률만
-  const totalW=widthOf(parts);
-  ctx.fillStyle=BG; ctx.globalAlpha=.85; ctx.fillRect(2,py-3,totalW+4,18); ctx.globalAlpha=1;
-  parts.forEach(([t,c])=>{ctx.fillStyle=c;ctx.fillText(t,px,py);px+=ctx.measureText(t).width+10;});
-  ctx.textBaseline='middle';
-  if(hv!=null){
-    const x=Math.round(X(hv))+.5;
-    ctx.strokeStyle=MUTED; ctx.setLineDash([3,3]); ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(x,top); ctx.lineTo(x,H-AXIS); ctx.stroke(); ctx.setLineDash([]);
-  }
-}
-
-function line(ctx,a,start,L,X,Y,color,w){
-  ctx.strokeStyle=color; ctx.lineWidth=w; ctx.beginPath(); let pen=false;
-  for(let i=start;i<L;i++){ if(a[i]==null){pen=false;continue;} pen?ctx.lineTo(X(i),Y(a[i])):ctx.moveTo(X(i),Y(a[i])); pen=true; }
-  ctx.stroke();
-}
-// 곡선과 기준선(80 또는 20) 사이를 기준선 바깥쪽만 채움
-function fillBand(ctx,a,start,L,X,Y,level,above,color,y0,y1,plotW){
-  const ly=Y(level);
-  ctx.save(); ctx.beginPath();
-  above?ctx.rect(0,y0,plotW,ly-y0):ctx.rect(0,ly,plotW,y1-ly); ctx.clip();
-  ctx.fillStyle=color; ctx.beginPath(); let first=null,lastI=null;
-  for(let i=start;i<L;i++){
-    if(a[i]==null) continue;
-    if(first==null){first=i;ctx.moveTo(X(i),ly);}
-    ctx.lineTo(X(i),Y(a[i])); lastI=i;
-  }
-  if(first!=null){ctx.lineTo(X(lastI),ly);ctx.closePath();ctx.fill();}
-  ctx.restore();
-}
-function markHL(ctx,x,y,text,color,isHigh,plotW){
-  ctx.fillStyle=color; ctx.strokeStyle=color; ctx.lineWidth=1;
-  const tw=ctx.measureText(text).width, right=x+tw+20<plotW;
-  const ty=isHigh?y-14:y+14;
-  ctx.beginPath(); ctx.moveTo(x,isHigh?y-3:y+3); ctx.lineTo(x,ty); ctx.lineTo(right?x+6:x-6,ty); ctx.stroke();
-  ctx.textBaseline='middle';
-  const tx=right?x+9:x-9-tw;
-  ctx.save(); ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--surface').trim(); ctx.globalAlpha=.85;
-  ctx.fillRect(tx-3,ty-8,tw+6,16); ctx.restore();
-  ctx.fillStyle=color; ctx.textAlign='left';
-  ctx.fillText(text,tx,ty);
-  ctx.textAlign='left';
-}
-function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const f=raw/p;return (f<1.5?1:f<3?2:f<7?5:10)*p;}
-function fmtAxis(v,step){const dec=step>=1?0:Math.min(4,Math.ceil(-Math.log10(step)));return v.toLocaleString('ko-KR',{minimumFractionDigits:dec,maximumFractionDigits:dec});}
-function fmtPx(v){if(v==null)return '—';const a=Math.abs(v);return v.toLocaleString('ko-KR',{maximumFractionDigits:a>=1000?0:a>=1?2:4});}
-function md(ts){const t=new Date(ts*1000);return `${String(t.getMonth()+1).padStart(2,'0')}/${String(t.getDate()).padStart(2,'0')}`;}
-let _rsT=null;
-window.addEventListener('resize',()=>{clearTimeout(_rsT);_rsT=setTimeout(drawStockChart,120);});
-window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change',()=>drawStockChart());
 
 // ── 초기 실행 ────────────────────────────────
 loadDashboard();
