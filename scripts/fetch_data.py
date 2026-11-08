@@ -67,23 +67,62 @@ def nasdaq100():
     return out
 
 
-def krx_top(sosok=0, suffix="KS", n=100):
-    out, seen = [], set()
-    for page in range(1, 5):
-        html = get(f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}",
-                   headers={"Referer": "https://finance.naver.com/"}).decode("euc-kr", "replace")
-        for code, name in re.findall(r'href="/item/main\.naver\?code=(\d{6})" class="tltle">([^<]+)</a>', html):
-            name = name.strip()
-            # 우선주 제외 (삼성전자우, 현대차2우B 등)
-            if code in seen or re.search(r"\d?우[A-C]?$|\(전환\)$", name):
+def _krx_pairs_api(market):
+    """네이버 모바일 증권 JSON (시가총액 순)."""
+    for page in range(1, 4):
+        j = json.loads(get(
+            f"https://m.stock.naver.com/api/stocks/marketValue/{market}?page={page}&pageSize=100",
+            headers={"Referer": "https://m.stock.naver.com/", "Accept": "application/json"}))
+        rows = j.get("stocks") or j.get("result") or (j if isinstance(j, list) else [])
+        if not rows:
+            print(f"    naver api {market} p{page}: keys={list(j)[:8] if isinstance(j, dict) else type(j)}")
+            return
+        for r in rows:
+            code = str(r.get("itemCode") or r.get("reutersCode") or r.get("code") or "")
+            name = r.get("stockName") or r.get("itemName") or r.get("name") or ""
+            # ETF/ETN 등은 제외
+            if r.get("stockEndType") not in (None, "stock"):
                 continue
-            seen.add(code)
-            out.append({"s": f"{code}.{suffix}", "n": name})
-            if len(out) >= n:
-                return out
-    if len(out) < 90:
-        raise ValueError(f"krx sosok={sosok} rows={len(out)}")
-    return out
+            yield code, name
+
+
+def _krx_pairs_html(sosok):
+    """네이버 금융 시가총액 페이지 (예비)."""
+    for page in range(1, 5):
+        raw = get(f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}",
+                  headers={"Referer": "https://finance.naver.com/"})
+        html = raw.decode("euc-kr", "replace")
+        pairs = re.findall(r'main\.naver\?code=(\d{6})"[^>]*>\s*([^<]+?)\s*</a>', html)
+        if not pairs:
+            snippet = re.sub(r"\s+", " ", html)[:200]
+            print(f"    naver html sosok={sosok} p{page}: len={len(raw)} head={snippet!r}")
+            return
+        yield from pairs
+
+
+def krx_top(sosok=0, suffix="KS", n=100):
+    market = "KOSPI" if sosok == 0 else "KOSDAQ"
+    last = None
+    for src in (lambda: _krx_pairs_api(market), lambda: _krx_pairs_html(sosok)):
+        out, seen = [], set()
+        try:
+            for code, name in src():
+                name = (name or "").strip()
+                # 우선주 제외 (삼성전자우, 현대차2우B 등)
+                if not re.fullmatch(r"\d{6}", code) or code in seen \
+                        or re.search(r"\d?우[A-C]?$|\(전환\)$", name):
+                    continue
+                seen.add(code)
+                out.append({"s": f"{code}.{suffix}", "n": name})
+                if len(out) >= n:
+                    return out
+        except Exception as e:  # noqa: BLE001
+            last = e
+            print(f"    krx {market} source failed: {e}")
+        if len(out) >= 90:
+            return out
+        last = last or ValueError(f"rows={len(out)}")
+    raise ValueError(f"krx {market}: {last}")
 
 
 def load_universe(now):
@@ -99,6 +138,9 @@ def load_universe(now):
     if old.get("updated"):
         age = datetime.now(timezone.utc) - datetime.fromisoformat(old["updated"])
         fresh = age.total_seconds() < 20 * 3600
+    # 비어 있는 목록이 있으면 시간과 관계없이 다시 시도
+    if any(not old.get(k) for k in ("nasdaq100", "kospi100", "kosdaq100")):
+        fresh = False
     if fresh and not os.environ.get("FORCE_UNIVERSE"):
         return old
     uni = {"updated": now}
