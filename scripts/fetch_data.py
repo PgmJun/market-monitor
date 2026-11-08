@@ -60,8 +60,10 @@ def nasdaq100():
                        headers={"Accept": "application/json"}))
     d = j.get("data") or {}
     rows = (d.get("data") or {}).get("rows") or d.get("rows") or []
+    tail = re.compile(r"\s+(Class [A-C] )?(Common Stock|Ordinary Shares|American Depositary Shares"
+                      r"|Common Shares|Capital Stock|Depositary Shares)\b.*$", re.I)
     out = [{"s": r["symbol"].strip().upper().replace("/", "-"),
-            "n": r.get("companyName", "").strip()} for r in rows if r.get("symbol")]
+            "n": tail.sub("", r.get("companyName", "")).strip()} for r in rows if r.get("symbol")]
     if len(out) < 90:
         raise ValueError(f"nasdaq100 rows={len(out)}")
     return out

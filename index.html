@@ -1065,7 +1065,8 @@ async function runAnalysis(){
   }
 
   const meta = d3m.meta;
-  const name = meta?.longName||meta?.shortName||raw;
+  const krName = /\.(KS|KQ)$/.test(raw) ? (UNIVERSE||[]).find(x=>x.s===raw)?.n : null;
+  const name = krName||meta?.longName||meta?.shortName||raw;
   const currency = meta?.currency||'USD';
   const price = d3m.closes[d3m.closes.length-1];
   const prev  = d3m.closes[d3m.closes.length-2]||price;
