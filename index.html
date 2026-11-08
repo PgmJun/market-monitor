@@ -323,8 +323,9 @@ footer a{color:var(--accent2);text-decoration:none}
 <!-- ═══════════ TAB 3: 종목 분석 ═══════════ -->
 <div id="tab-analyzer" class="tab-content">
   <div class="stock-search">
-    <input class="ticker-input" id="ticker-input" placeholder="AAPL, TSLA, 005930.KS …" maxlength="20"
-      onkeydown="if(event.key==='Enter')runAnalysis()">
+    <input class="ticker-input" id="ticker-input" placeholder="AAPL, 삼성전자, 005930 …" maxlength="30"
+      list="ticker-list" onfocus="fillTickerList()" onkeydown="if(event.key==='Enter')runAnalysis()">
+    <datalist id="ticker-list"></datalist>
     <button class="analyze-btn" onclick="runAnalysis()">분석하기</button>
   </div>
   <div class="preset-chips">
@@ -391,13 +392,51 @@ async function loadSnapshot(force=false){
   }catch{}
   return SNAP;
 }
-async function loadHistory(){
-  if(HIST) return HIST;
+// 종목별 5년 일봉: data/history/<SYM>.json (나스닥100 · 코스피/코스닥 시총 상위 100 · 빠른선택)
+const HIST_CACHE={};
+async function loadHistory(sym){
+  if(sym in HIST_CACHE) return HIST_CACHE[sym];
+  let d=null;
   try{
-    const r=await fetch('data/history.json?t='+Math.floor(Date.now()/600000));
-    if(r.ok) HIST=await r.json();
+    const r=await fetch('data/history/'+encodeURIComponent(sym)+'.json?t='+Math.floor(Date.now()/600000));
+    if(r.ok) d=await r.json();
   }catch{}
-  return HIST;
+  HIST_CACHE[sym]=d;
+  return d;
+}
+
+// 종목 목록 — 이름/코드로 검색 (예: 삼성전자, 005930, apple)
+let UNIVERSE=null;
+async function loadUniverse(){
+  if(UNIVERSE) return UNIVERSE;
+  try{
+    const r=await fetch('data/universe.json?t='+Math.floor(Date.now()/3600000));
+    if(r.ok){
+      const u=await r.json();
+      UNIVERSE=[...(u.nasdaq100||[]),...(u.kospi100||[]),...(u.kosdaq100||[])];
+    }
+  }catch{}
+  return UNIVERSE||[];
+}
+async function resolveTicker(input){
+  const q=input.trim();
+  if(!q) return q;
+  const up=q.toUpperCase();
+  const list=await loadUniverse();
+  if(/^\d{6}$/.test(up)) return list.find(x=>x.s.startsWith(up+'.'))?.s||up+'.KS';
+  if(list.some(x=>x.s===up)) return up;
+  const norm=s=>s.toUpperCase().replace(/[\s.,]|INC$|CORP(ORATION)?$|주식회사/g,'');
+  const nq=norm(q);
+  const hit=list.find(x=>norm(x.n)===nq)
+         ||list.find(x=>norm(x.n).startsWith(nq))
+         ||list.find(x=>nq.length>=2&&norm(x.n).includes(nq));
+  return hit?hit.s:up;
+}
+async function fillTickerList(){
+  const list=await loadUniverse();
+  const dl=document.getElementById('ticker-list');
+  if(!dl||!list.length) return;
+  dl.innerHTML=list.map(x=>`<option value="${x.s}">${x.n.replace(/"/g,'&quot;')}</option>`).join('');
 }
 const RANGE_BARS={'2d':5,'5d':5,'3mo':63,'6mo':126,'1y':252,'5y':99999};
 function sliceSeries(d,range){
@@ -452,8 +491,8 @@ async function fetchQ(sym,range='2d'){
     const s=await loadSnapshot();
     if(s?.quotes?.[sym]) return sliceSeries(s.quotes[sym],range);
   }
-  const h=await loadHistory();
-  if(h?.symbols?.[sym]) return sliceSeries(h.symbols[sym],range);
+  const h=await loadHistory(sym);
+  if(h?.closes?.length) return sliceSeries(h,range);
   try{
     const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=${range}`;
     const text=await fetchWithProxy(url);
@@ -1008,8 +1047,10 @@ function stochastic(closes,highs,lows,n=14){
 }
 
 async function runAnalysis(){
-  const raw=document.getElementById('ticker-input').value.trim().toUpperCase();
+  const inputEl=document.getElementById('ticker-input');
+  const raw=await resolveTicker(inputEl.value);
   if(!raw) return;
+  inputEl.value=raw;
   const res=document.getElementById('analysis-result');
   res.style.display='block';
   res.innerHTML=`<div style="padding:40px;text-align:center;color:var(--muted)"><span class="spinner"></span> ${raw} 데이터 분석 중...</div>`;
@@ -1019,7 +1060,7 @@ async function runAnalysis(){
   ]);
 
   if(!d3m?.closes?.length){
-    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>빠른선택 종목은 서버에 미리 저장된 데이터를 쓰고, 그 외 티커는 공개 프록시로 받아와서 가끔 실패할 수 있어요. 잠시 후 다시 시도하거나 Yahoo Finance 심볼을 확인해주세요. (예: 삼성전자 → 005930.KS, 비트코인 → BTC-USD)</div></div>`;
+    res.innerHTML=`<div class="eval-banner neutral"><div class="eb-top"><div class="eb-icon">❌</div><div><div class="eb-title">데이터 없음</div></div></div><div class="eb-desc">티커 심볼 <b>${raw}</b>을 찾을 수 없습니다.<br>나스닥100 · 코스피/코스닥 시가총액 상위 100 종목은 서버에 미리 저장된 데이터를 써요. 그 외 종목은 공개 프록시로 받아와서 실패할 수 있어요. 이름(삼성전자)이나 코드(005930), Yahoo Finance 심볼(BTC-USD)로 다시 시도해보세요.</div></div>`;
     return;
   }
 

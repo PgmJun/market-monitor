@@ -3,7 +3,8 @@
 
 Runs in GitHub Actions (no CORS limits there). Output:
   data/market.json   - dashboard quotes, VIX, fear & greed, news
-  data/history.json  - 5y daily history for preset tickers (종목 분석 빠른선택)
+  data/universe.json - 나스닥100 + 코스피 시총 상위 100 종목 목록 (매일 갱신)
+  data/history/*.json - 종목별 5y daily history (종목 분석)
 """
 import json
 import os
@@ -47,7 +48,71 @@ def get(url, timeout=20, headers=None):
 
 
 def r4(v):
-    return None if v is None else round(float(v), 4)
+    if v is None:
+        return None
+    v = float(v)
+    return round(v, 2 if abs(v) >= 1 else 4)
+
+
+# ── 종목 유니버스 (나스닥100 + 코스피·코스닥 시총 상위 100) ──────────────
+def nasdaq100():
+    j = json.loads(get("https://api.nasdaq.com/api/quote/list-type/nasdaq100",
+                       headers={"Accept": "application/json"}))
+    d = j.get("data") or {}
+    rows = (d.get("data") or {}).get("rows") or d.get("rows") or []
+    out = [{"s": r["symbol"].strip().upper().replace("/", "-"),
+            "n": r.get("companyName", "").strip()} for r in rows if r.get("symbol")]
+    if len(out) < 90:
+        raise ValueError(f"nasdaq100 rows={len(out)}")
+    return out
+
+
+def krx_top(sosok=0, suffix="KS", n=100):
+    out, seen = [], set()
+    for page in range(1, 5):
+        html = get(f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}",
+                   headers={"Referer": "https://finance.naver.com/"}).decode("euc-kr", "replace")
+        for code, name in re.findall(r'href="/item/main\.naver\?code=(\d{6})" class="tltle">([^<]+)</a>', html):
+            name = name.strip()
+            # 우선주 제외 (삼성전자우, 현대차2우B 등)
+            if code in seen or re.search(r"\d?우[A-C]?$|\(전환\)$", name):
+                continue
+            seen.add(code)
+            out.append({"s": f"{code}.{suffix}", "n": name})
+            if len(out) >= n:
+                return out
+    if len(out) < 90:
+        raise ValueError(f"krx sosok={sosok} rows={len(out)}")
+    return out
+
+
+def load_universe(now):
+    up = "data/universe.json"
+    old = {}
+    if os.path.exists(up):
+        try:
+            with open(up, encoding="utf-8") as f:
+                old = json.load(f)
+        except Exception:  # noqa: BLE001
+            old = {}
+    fresh = False
+    if old.get("updated"):
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(old["updated"])
+        fresh = age.total_seconds() < 20 * 3600
+    if fresh and not os.environ.get("FORCE_UNIVERSE"):
+        return old
+    uni = {"updated": now}
+    for key, fn in (("nasdaq100", nasdaq100), ("kospi100", lambda: krx_top(0, "KS")),
+                    ("kosdaq100", lambda: krx_top(1, "KQ"))):
+        try:
+            uni[key] = fn()
+            print(f"universe {key}: {len(uni[key])}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! universe {key}: {e} (이전 목록 유지)")
+            uni[key] = old.get(key, [])
+    with open(up, "w", encoding="utf-8") as f:
+        json.dump(uni, f, ensure_ascii=False, separators=(",", ":"))
+    return uni
 
 
 def chart(sym, rng):
@@ -173,31 +238,54 @@ def main():
         with open("data/market.json", "w", encoding="utf-8") as f:
             json.dump(market, f, ensure_ascii=False, separators=(",", ":"))
 
-    # Preset history refreshes at most every ~3h to keep commits small.
-    hp = "data/history.json"
-    stale = True
-    if os.path.exists(hp):
+    # 종목별 5년 일봉: data/history/<SYM>.json
+    # 빠른선택 종목은 3시간마다, 나머지(나스닥100·코스피100)는 20시간마다 갱신.
+    uni = load_universe(now)
+    universe = list(dict.fromkeys(
+        PRESET_SYMS + [x["s"] for x in uni.get("nasdaq100", [])]
+        + [x["s"] for x in uni.get("kospi100", [])]
+        + [x["s"] for x in uni.get("kosdaq100", [])]))
+    hdir = "data/history"
+    os.makedirs(hdir, exist_ok=True)
+    ip = os.path.join(hdir, "_index.json")
+    idx = {}
+    if os.path.exists(ip):
         try:
-            with open(hp, encoding="utf-8") as f:
-                old = json.load(f)
-            age = datetime.now(timezone.utc) - datetime.fromisoformat(old["updated"])
-            stale = age.total_seconds() > 3 * 3600
-            first = next(iter(old["symbols"].values()), {})
-            if "opens" not in first or "t" not in first:
-                stale = True  # 구버전 포맷 → 즉시 재수집
+            with open(ip, encoding="utf-8") as f:
+                idx = json.load(f)
         except Exception:  # noqa: BLE001
-            stale = True
-    if stale or os.environ.get("FORCE_HISTORY"):
-        hist = {}
-        for s in PRESET_SYMS:
-            d = chart(s, "5y")
-            if d:
-                hist[s] = d
-        print(f"history ok: {len(hist)}/{len(PRESET_SYMS)}")
-        if hist:
-            with open(hp, "w", encoding="utf-8") as f:
-                json.dump({"updated": now, "symbols": hist}, f,
-                          ensure_ascii=False, separators=(",", ":"))
+            idx = {}
+    force = bool(os.environ.get("FORCE_HISTORY"))
+    t_now = time.time()
+    ok = fail = skip = 0
+    started = time.time()
+    for s in universe:
+        path = os.path.join(hdir, f"{s}.json")
+        max_age = 3 * 3600 if s in PRESET_SYMS else 20 * 3600
+        if not force and os.path.exists(path) and t_now - idx.get(s, 0) < max_age:
+            skip += 1
+            continue
+        if time.time() - started > 15 * 60:  # 워크플로 시간 초과 방지, 나머지는 다음 실행에서
+            print("  history time budget reached; continuing next run")
+            break
+        d = chart(s, "5y")
+        time.sleep(0.3)
+        if not d:
+            fail += 1
+            continue
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
+        idx[s] = int(t_now)
+        ok += 1
+    # 유니버스에서 빠진 종목 파일 정리
+    keep = set(universe)
+    for fn in os.listdir(hdir):
+        if fn.endswith(".json") and fn != "_index.json" and fn[:-5] not in keep:
+            os.remove(os.path.join(hdir, fn))
+            idx.pop(fn[:-5], None)
+    with open(ip, "w", encoding="utf-8") as f:
+        json.dump(idx, f, separators=(",", ":"))
+    print(f"history: updated {ok}, failed {fail}, fresh {skip}, total {len(universe)}")
 
 
 if __name__ == "__main__":
